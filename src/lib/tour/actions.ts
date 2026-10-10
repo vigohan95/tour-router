@@ -103,6 +103,8 @@ export interface BuildOptions {
   startCity?: string;
   startDate?: string; // yyyy-mm-dd
   gapDays?: number;
+  /** Keep `cities` in the given order (grid edits) instead of optimising the route. */
+  keepOrder?: boolean;
 }
 
 export function buildItinerary(act: Act, plan: Plan, policy: Policy, opts: BuildOptions, mode = plan.mode): Itinerary {
@@ -115,7 +117,7 @@ export function buildItinerary(act: Act, plan: Plan, policy: Policy, opts: Build
   if (stopsIn.length === 0) throw new Error("No cities to route.");
   const points = stopsIn.map(({ c }) => ({ lat: c.lat, lon: c.lon }));
   const startIdx = opts.startCity ? stopsIn.findIndex(({ c }) => c.name.toLowerCase() === opts.startCity!.toLowerCase()) : -1;
-  const order = routeOrder(points, startIdx >= 0 ? startIdx : undefined);
+  const order = opts.keepOrder ? points.map((_, i) => i) : routeOrder(points, startIdx >= 0 ? startIdx : undefined);
   const start = opts.startDate ? new Date(opts.startDate + "T00:00:00Z") : nextMonthStart();
   const dates = showDates(start, order.length, opts.gapDays ?? policy.minGapDays);
   const stops: Stop[] = order.map((idx, i) => {

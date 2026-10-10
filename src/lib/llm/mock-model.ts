@@ -15,7 +15,6 @@ const strs = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 const s = (v: unknown, d = ""): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : d);
 const n = (v: unknown, d = 0): number => (typeof v === "number" ? v : Number(v) || d);
 const usd = (v: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v);
-const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 export interface TurnResult {
   toolName: string;

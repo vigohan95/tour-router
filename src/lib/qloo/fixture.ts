@@ -79,10 +79,11 @@ function artistFor(id: string): FixtureArtist {
 /** Synthetic affinity of a city's population with an act: a home-region bump + a hashed spread. Deterministic. */
 export function cityAffinity(artistId: string, city: City): number {
   const a = artistFor(artistId);
-  const base = a.home.includes(city.region) ? 0.55 : 0.25;
-  const spread = unit(`${artistId}|${city.name}`) * 0.4;
-  const size = Math.min(city.metroM, 10) / 100; // bigger metros nudge up, max +0.1
-  return Math.min(0.99, Number((base + spread + size).toFixed(3)));
+  const base = a.home.includes(city.region) ? 0.4 : 0.15;
+  const spread = unit(`${artistId}|${city.name}`) * 0.35;
+  const size = Math.min(city.metroM, 8) / 100; // bigger metros nudge up, max +0.08
+  // Heatmap cells scatter +-0.15 around this and the ranking averages the top cells, so city scores land ~50-93%.
+  return Math.min(0.95, Number((base + spread + size).toFixed(3)));
 }
 
 function contributions(signalIds: string[], affinity: number, seed: string): Contribution[] {
@@ -223,7 +224,7 @@ export class FixtureQloo implements QlooAdapter {
     const n = Math.min(p.take ?? 24, 48);
     const cells = Array.from({ length: n }, (_, i) => {
       const seed = `${artistId}|${city.name}|cell|${i}`;
-      const affinity = Number(Math.min(0.99, Math.max(0.05, base + (unit(seed) - 0.5) * 0.3)).toFixed(3));
+      const affinity = Number(Math.min(0.97, Math.max(0.05, base + (unit(seed) - 0.5) * 0.3)).toFixed(3));
       return { latitude: Number((city.lat + (unit(seed + "lat") - 0.5) * 0.3).toFixed(4)), longitude: Number((city.lon + (unit(seed + "lon") - 0.5) * 0.3).toFixed(4)), affinity, popularity: Number((0.2 + unit(seed + "pop") * 0.7).toFixed(3)) };
     }).sort((a, b) => b.affinity - a.affinity);
     cells.forEach((c, i) => Object.assign(c, { affinity_rank: Number((1 - i / n).toFixed(3)) }));
