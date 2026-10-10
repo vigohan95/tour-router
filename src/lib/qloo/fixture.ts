@@ -112,7 +112,7 @@ function venue(city: City, artistId: string, i: number, explain: boolean, signal
   const name = i === 0 ? `${city.name} ${pick(seed, VENUE_SUFFIX)}` : `${pick(seed + "p", VENUE_PREFIX)} ${pick(seed + "s", VENUE_SUFFIX)}`;
   const capacity = [900, 1400, 1800, 2200, 2800, 3500, 4200, 5500, 7500][hash(seed + "cap") % 9];
   const affinity = Number(Math.max(0.2, cityAffinity(artistId, city) - i * 0.06 + unit(seed) * 0.08).toFixed(3));
-  const rentUsd = Math.round((capacity * (6 + unit(seed + "rent") * 6)) / 100) * 100;
+  const rentUsd = Math.round((capacity * (3 + unit(seed + "rent") * 3)) / 100) * 100; // 3-6 USD per seat, synthetic
   return {
     entity_id: `${FIXTURE_ID_PREFIX}place:${slug(city.name)}:${slug(name)}`,
     name,

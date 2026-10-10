@@ -114,7 +114,7 @@ export function parseSearchHit(raw: unknown): SearchHit {
     name: str(o.name) ?? "",
     types: arr(o.types).map(String),
     popularity: num(o.popularity),
-    hint: str(o.disambiguation) ?? str(props.short_description) ?? arr(o.tags).map((t) => str(j(t).name)).filter(Boolean).slice(0, 3).join(", ") || undefined,
+    hint: str(o.disambiguation) ?? str(props.short_description) ?? (arr(o.tags).map((t) => str(j(t).name)).filter(Boolean).slice(0, 3).join(", ") || undefined),
     raw,
   };
 }

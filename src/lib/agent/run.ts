@@ -1,0 +1,64 @@
+/**
+ * Shared agent wiring for the chat route and one-shot runs (tests).
+ */
+import { generateText, stepCountIs, type ModelMessage, type ToolApprovalStatus, type ToolSet } from "ai";
+import { getModel } from "../llm";
+import { qlooMode } from "../qloo";
+import { evaluateAction } from "../policy/engine";
+import { audit, getStore } from "../store";
+import { systemPrompt } from "./system";
+import { buildTools } from "./tools";
+
+export const MAX_STEPS = 24;
+
+export interface AgentSetup {
+  model: ReturnType<typeof getModel>;
+  tools: ToolSet;
+  system: string;
+  stopWhen: ReturnType<typeof stepCountIs>;
+  /** AI SDK v7 `toolApproval` hook: the policy engine decides allow / ask / deny per tool call. */
+  toolApproval: (options: { toolCall: { toolName: string; input: unknown } }) => Promise<ToolApprovalStatus>;
+}
+
+export function agentSetup(opts: { unattended?: boolean; forceMock?: boolean } = {}): AgentSetup {
+  const store = getStore();
+  return {
+    model: getModel({ forceMock: opts.forceMock }),
+    tools: buildTools(),
+    system: systemPrompt(store.policy, store.plan, qlooMode()),
+    stopWhen: stepCountIs(MAX_STEPS),
+    toolApproval: async ({ toolCall }) => {
+      const ev = evaluateAction(toolCall.toolName, toolCall.input, { policy: store.policy, plan: store.plan });
+      if (ev.decision === "deny") {
+        audit({ actor: "policy", tool: toolCall.toolName, action: `${ev.summary} - blocked`, decision: "denied", reason: ev.reason, rule: ev.rule, input: toolCall.input });
+        return { type: "denied", reason: ev.reason };
+      }
+      if (ev.decision === "approve") {
+        if (opts.unattended) {
+          audit({ actor: "policy", tool: toolCall.toolName, action: `${ev.summary} - needs you (skipped in unattended run)`, decision: "approval-required", reason: ev.reason, rule: ev.rule, input: toolCall.input });
+          return { type: "denied", reason: `Needs human approval (${ev.reason}). Skipped because this run is unattended.` };
+        }
+        // The SDK re-runs toolApproval when the conversation continues after the user's answer; log once.
+        const key = JSON.stringify(toolCall.input);
+        const already = store.audit.slice(0, 30).some((a) => a.decision === "approval-required" && a.tool === toolCall.toolName && JSON.stringify(a.input) === key);
+        if (!already) audit({ actor: "policy", tool: toolCall.toolName, action: `${ev.summary} - waiting for your approval`, decision: "approval-required", reason: ev.reason, rule: ev.rule, input: toolCall.input });
+        return { type: "user-approval", reason: ev.reason };
+      }
+      return { type: "approved", reason: ev.reason };
+    },
+  };
+}
+
+/** One-shot, non-streaming run (tests, scripts). Policy-gated actions that need a human are skipped. */
+export async function runOnce(prompt: string, opts: { unattended?: boolean; messages?: ModelMessage[]; forceMock?: boolean } = {}) {
+  const setup = agentSetup({ unattended: opts.unattended ?? true, forceMock: opts.forceMock });
+  const result = await generateText({
+    model: setup.model,
+    system: setup.system,
+    tools: setup.tools,
+    stopWhen: setup.stopWhen,
+    toolApproval: setup.toolApproval,
+    ...(opts.messages ? { messages: [...opts.messages, { role: "user", content: prompt }] } : { prompt }),
+  });
+  return { text: result.text, steps: result.steps.length, toolCalls: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)) };
+}

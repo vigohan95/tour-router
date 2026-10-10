@@ -114,7 +114,7 @@ export function citiesIn(regions: Region[] | undefined): City[] {
 
 export function parseRegion(text: string): Region | undefined {
   const t = text.toLowerCase();
-  if (/\b(north america|na tour|us tour|usa|united states|america|canada|mexico)\b/.test(t)) return "North America";
+  if (/\b(north americas?|north american|na tour|us tour|usa|united states|america|american|canada|mexico)\b/.test(t)) return "North America";
   if (/\b(uk|united kingdom|britain|british|ireland|irish)\b/.test(t)) return "UK & Ireland";
   if (/\b(europe|european|eu tour)\b/.test(t)) return "Europe";
   if (/\b(oceania|australia|australian|new zealand|anz)\b/.test(t)) return "Oceania";

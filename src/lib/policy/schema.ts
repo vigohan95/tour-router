@@ -9,7 +9,7 @@ export const PolicySchema = z.object({
   /** Hard cap on cities in one itinerary; a bigger request asks you first. */
   maxCities: z.number().int().min(1).max(40).default(12),
   /** Estimated venue cost per city (USD) the agent may commit to on its own; above it the stop asks you. */
-  budgetPerCity: z.number().min(0).default(25000),
+  budgetPerCity: z.number().min(0).default(30000),
   /** Cities the agent must never route (already played, embargoed, no visa...). Case-insensitive names. */
   excludeCities: z.array(z.string()).default([]),
   /** Regions the agent may plan in. Empty = anywhere. */
