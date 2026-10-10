@@ -218,7 +218,10 @@ function planPlaybook(turn: Turn): Action {
     .map((c) => s(c.city));
   const mentioned = parseCities(text);
   const avoid = /\b(skip|avoid|without|except|not)\b/i.test(text) ? mentioned : [];
-  const chosen = cities.filter((c) => !avoid.includes(c)).slice(0, wanted);
+  const startCity = parseStartCity(text);
+  // A named start city is part of the tour whatever its rank, as long as it is a ranked, non-excluded candidate.
+  const pool = cities.filter((c) => !avoid.includes(c));
+  const chosen = startCity && pool.includes(startCity) ? [startCity, ...pool.filter((c) => c !== startCity)].slice(0, wanted) : pool.slice(0, wanted);
   if (chosen.length === 0) return { type: "text", text: "Every candidate city is excluded by your policy; relax the exclude list or regions and ask again." };
   // 3. partners for each chosen city, in parallel
   const partners = has(turn, "pick_city_partners");
@@ -229,8 +232,7 @@ function planPlaybook(turn: Turn): Action {
     const ok = partners.filter((r) => !r.denied && !r.error).map((r) => s(r.input.city));
     if (ok.length === 0) return { type: "text", text: `No city could be prepared: ${partners.map((r) => `${s(r.input.city)} - ${r.denied ?? r.error}`).join("; ")}.` };
     const input: J = { cities: ok };
-    const start = parseStartCity(text);
-    if (start && ok.includes(start)) input.startCity = start;
+    if (startCity && ok.includes(startCity)) input.startCity = startCity;
     const date = parseStartDate(text);
     if (date) input.startDate = date;
     return { type: "calls", calls: [{ toolName: "build_itinerary", input }] };

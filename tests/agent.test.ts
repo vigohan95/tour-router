@@ -55,8 +55,8 @@ describe("agent loop (no keys)", () => {
     expect(plan.candidates.length).toBeGreaterThanOrEqual(10);
     expect(plan.itinerary?.stops).toHaveLength(6);
     expect(plan.itinerary?.startDate).toBe("2027-03-01");
-    const chicago = plan.candidates.find((c) => c.city === "Chicago");
-    if (chicago && chicago.rank <= 6) expect(plan.itinerary?.stops[0].city).toBe("Chicago");
+    // The named start city is force-included and routed first, whatever its rank.
+    expect(plan.itinerary?.stops[0].city).toBe("Chicago");
     expect(r.text).toMatch(/Route for Nova Reyes: 6 stops/);
     expect(r.text).toContain("Why ");
     expect(r.text).toContain("opener:");
