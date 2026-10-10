@@ -110,7 +110,23 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
         <span className="text-xs text-muted">{candidates.length} ranked by heatmap affinity. Tick Exclude to drop a city; edit Stop to re-order the route.</span>
       </div>
       <div className="min-h-0 flex-1">
-        <AgGridReact<Row> theme={theme} rowData={rows} columnDefs={columnDefs} defaultColDef={{ sortable: true, filter: true, resizable: true }} getRowId={(p) => p.data.city} onCellValueChanged={onCellValueChanged} rowClassRules={rowClassRules} quickFilterText={quick} animateRows tooltipShowDelay={300} singleClickEdit />
+        <AgGridReact<Row>
+          theme={theme}
+          rowData={rows}
+          columnDefs={columnDefs}
+          defaultColDef={{ sortable: true, filter: true, resizable: true }}
+          getRowId={(p) => p.data.city}
+          onCellValueChanged={onCellValueChanged}
+          // A new ranking should read top-down by rank unless the user sorted by another column.
+          onRowDataUpdated={(e) => {
+            if (!e.api.getColumnState().some((c) => c.sort)) e.api.applyColumnState({ state: [{ colId: "rank", sort: "asc" }], defaultState: { sort: null } });
+          }}
+          rowClassRules={rowClassRules}
+          quickFilterText={quick}
+          animateRows
+          tooltipShowDelay={300}
+          singleClickEdit
+        />
       </div>
     </div>
   );
