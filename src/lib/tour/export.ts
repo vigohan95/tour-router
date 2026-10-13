@@ -14,7 +14,8 @@ export function itineraryToCsv(it: Itinerary): string {
 }
 
 export function itineraryToMarkdown(it: Itinerary): string {
-  const head = `# ${it.act.name} - ${it.stops.length}-stop tour (${it.startDate} to ${it.endDate})\n\n${it.totalKm.toLocaleString("en-US")} km of travel, estimated venue cost ${it.estimatedCostUsd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}. Data: ${it.mode === "live" ? "Qloo (live)" : "synthetic fixtures (not Qloo data)"}.\n\n`;
+  const cost = it.estimatedCostUsd > 0 ? `, estimated venue cost ${it.estimatedCostUsd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}` : "";
+  const head = `# ${it.act.name} - ${it.stops.length}-stop tour (${it.startDate} to ${it.endDate})\n\n${it.totalKm.toLocaleString("en-US")} km of travel${cost}. Data: ${it.mode === "live" ? "Qloo (live)" : "synthetic fixtures (not Qloo data)"}.\n\n`;
   const table = ["| # | Date | City | Affinity | Venue | Opener | Brand | Leg |", "|---|---|---|---|---|---|---|---|", ...it.stops.map((s) => `| ${s.order} | ${s.date} | ${s.city}, ${s.country} | ${Math.round(s.score * 100)}% | ${s.venue ? `${s.venue.name}${s.venue.capacity ? ` (${s.venue.capacity.toLocaleString("en-US")})` : ""}` : "-"} | ${s.opener?.name ?? "-"} | ${s.brand?.name ?? "-"} | ${s.legKm ? `${s.legKm.toLocaleString("en-US")} km` : "-"} |`)].join("\n");
   return head + table + "\n";
 }

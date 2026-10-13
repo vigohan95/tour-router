@@ -31,7 +31,7 @@ export default function ItineraryPanel({ itinerary, onReroute, onShare, shared }
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm font-semibold">5. Itinerary</div>
         <span className="text-xs text-muted">
-          {itinerary.act.name} - {itinerary.stops.length} stops, {itinerary.startDate} to {itinerary.endDate}, {itinerary.totalKm.toLocaleString("en-US")} km, est. venues {usd(itinerary.estimatedCostUsd)}
+          {itinerary.act.name} - {itinerary.stops.length} stops, {itinerary.startDate} to {itinerary.endDate}, {itinerary.totalKm.toLocaleString("en-US")} km{itinerary.estimatedCostUsd > 0 ? `, est. venues ${usd(itinerary.estimatedCostUsd)}` : ""}
         </span>
         <span className="ml-auto flex flex-wrap gap-1">
           {onShare && (

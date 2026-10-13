@@ -10,9 +10,9 @@ export const BASELINE_LABEL: Record<CompareResult["against"], string> = {
 /** One-paragraph summary for the agent and the share page. */
 export function compareText(r: CompareResult, actName: string): string {
   const pp = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n * 100)} pts`;
-  const km = (n: number) => `${n >= 0 ? "+" : ""}${n.toLocaleString("en-US")} km`;
+  const km = (n: number) => (n === 0 ? "the same distance" : `${Math.abs(n).toLocaleString("en-US")} km ${n > 0 ? "more" : "fewer"}`);
   const parts = [`Against ${r.label}: ${r.swappedIn.length ? `taste swaps in ${r.swappedIn.map((s) => s.city).join(", ")}` : "the same cities"}${r.swappedOut.length ? ` and drops ${r.swappedOut.map((s) => s.city).join(", ")}` : ""}.`];
-  parts.push(`Average fan affinity ${Math.round(r.avgAffinity.plan * 100)}% vs ${Math.round(r.avgAffinity.baseline * 100)}% (${pp(r.avgAffinity.delta)}), travel ${r.totalKm.plan.toLocaleString("en-US")} km vs ${r.totalKm.baseline.toLocaleString("en-US")} km (${km(r.totalKm.delta)}).`);
+  parts.push(`Average fan affinity ${Math.round(r.avgAffinity.plan * 100)}% vs ${Math.round(r.avgAffinity.baseline * 100)}% (${pp(r.avgAffinity.delta)}); travel ${r.totalKm.plan.toLocaleString("en-US")} km vs ${r.totalKm.baseline.toLocaleString("en-US")} km, ${km(r.totalKm.delta)} for the taste route.`);
   if (r.openers.gained.length) parts.push(`Openers only the taste route carries: ${r.openers.gained.join(", ")}.`);
   if (r.brands.gained.length) parts.push(`Brands only the taste route carries: ${r.brands.gained.join(", ")}.`);
   if (r.openers.lost.length || r.brands.lost.length) parts.push(`Given up: ${[...r.openers.lost, ...r.brands.lost].join(", ")}.`);

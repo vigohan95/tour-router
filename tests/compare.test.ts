@@ -35,7 +35,7 @@ describe("comparePlans (pure)", () => {
     expect(text).toContain("swaps in Denver, Nashville");
     expect(text).toContain("drops New York, Los Angeles");
     expect(text).toContain("80% vs 53% (+27 pts)");
-    expect(text).toContain("-300 km");
+    expect(text).toContain("300 km fewer for the taste route");
     const same = comparePlans(taste, taste, "previous");
     expect(same.swappedIn).toEqual([]);
     expect(compareText(same, "Nova Reyes")).toContain("agree on the cities");
@@ -46,6 +46,9 @@ describe("comparePlans (pure)", () => {
     const cands = [mk("Austin", 0.9), mk("New York", 0.2), mk("Los Angeles", 0.3, true), mk("Chicago", 0.6)];
     expect(baselineCities(cands, 2, "population")).toEqual(["New York", "Chicago"]);
     expect(baselineCities(cands, 2, "popularity")).toEqual(["Austin", "Chicago"]);
+    // A named start city stays in the baseline whatever its size or popularity.
+    expect(baselineCities(cands, 2, "population", "Austin")).toEqual(["Austin", "New York"]);
+    expect(baselineCities(cands, 2, "population", "Atlantis")).toEqual(["New York", "Chicago"]);
     expect(CITIES.find((c) => c.name === "New York")!.metroM).toBeGreaterThan(CITIES.find((c) => c.name === "Chicago")!.metroM);
   });
 });
@@ -58,10 +61,15 @@ describe("compareWith (over the plan)", () => {
     plan.candidates = await rankCities(act, store.policy, {}, fx);
     const top = plan.candidates.filter((c) => !c.noSignal).slice(0, 4).map((c) => c.city);
     for (const c of top) await pickPartners(act, c, store.policy, plan, fx);
-    buildItinerary(act, plan, store.policy, { cities: top, startDate: "2027-03-01" });
+    buildItinerary(act, plan, store.policy, { cities: top, startCity: top[3], startDate: "2027-03-01", gapDays: 3 });
+    expect(plan.itinerary?.startCity).toBe(top[3]);
     const r = compareWith(act, plan, store.policy, "population");
     expect(r.baseline.stops).toHaveLength(4);
     expect(r.baseline.startDate).toBe("2027-03-01");
+    // The named start city is kept and routed first in the baseline too, with the same gap.
+    expect(r.baseline.stops[0].city).toBe(top[3]);
+    expect(r.baseline.stops[1].date).toBe("2027-03-04");
+    expect(r.swappedIn.map((s) => s.city)).not.toContain(top[3]);
     expect(r.baseline.stops.map((s) => s.city)).toEqual(expect.arrayContaining(["New York"]));
     // The synthetic ranking is not population order, so the sets differ.
     expect(r.swappedIn.length + r.swappedOut.length).toBeGreaterThan(0);

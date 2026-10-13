@@ -13,12 +13,16 @@ import { BASELINE_LABEL } from "./compare-text";
 
 export type BaselineMode = "population" | "popularity";
 
-/** The `n` non-excluded candidates a promoter would pick with no taste data: by metro size, or by raw listener density. */
-export function baselineCities(candidates: RankedCity[], n: number, mode: BaselineMode): string[] {
+/**
+ * The `n` non-excluded candidates a promoter would pick with no taste data: by metro size, or by raw listener
+ * density. A start city the promoter named is kept in both routes, so the diff only shows what taste changed.
+ */
+export function baselineCities(candidates: RankedCity[], n: number, mode: BaselineMode, keep?: string): string[] {
   const pool = candidates.filter((c) => !c.excluded);
   const metro = new Map(CITIES.map((c) => [c.name, c.metroM]));
   const sorted = [...pool].sort((a, b) => (mode === "population" ? (metro.get(b.city) ?? 0) - (metro.get(a.city) ?? 0) : b.popularity - a.popularity) || a.city.localeCompare(b.city));
-  return sorted.slice(0, n).map((c) => c.city);
+  const kept = keep && pool.some((c) => c.city === keep) ? [keep] : [];
+  return [...kept, ...sorted.map((c) => c.city).filter((c) => !kept.includes(c))].slice(0, n);
 }
 
 const round = (n: number, d = 3) => Number(n.toFixed(d));
@@ -64,9 +68,11 @@ export function compareWith(act: Act, plan: Plan, policy: Policy, against: Compa
     if (!plan.previousItinerary) throw new Error("There is no previous itinerary to compare with.");
     baseline = plan.previousItinerary;
   } else {
-    const cities = baselineCities(plan.candidates, current.stops.length, against);
+    const startCity = opts.startCity ?? current.startCity;
+    const cities = baselineCities(plan.candidates, current.stops.length, against, startCity);
     if (cities.length === 0) throw new Error("No candidates to build a baseline from; rank cities first.");
-    baseline = makeItinerary(act, plan, policy, { cities, startCity: opts.startCity, startDate: opts.startDate ?? current.startDate, gapDays: opts.gapDays }, plan.mode, now);
+    // Same start city, same dates, same gap, same routing (nearest neighbour + 2-opt from that start).
+    baseline = makeItinerary(act, plan, policy, { cities, startCity, startDate: opts.startDate ?? current.startDate, gapDays: opts.gapDays ?? current.gapDays }, plan.mode, now);
     baseline.id = `baseline_${against}_${current.id}`;
   }
   const result = comparePlans(current, baseline, against, now);

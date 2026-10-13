@@ -161,11 +161,16 @@ function liftText(r: RankedCity): string {
   return `#${r.rank} by taste and by metro size`;
 }
 
-function whyText(act: Act, city: string, venues: Partner[], recommended: Partner | undefined, brands: Partner[], openers: Partner[], ranked: RankedCity | undefined): string {
+/** The ranking sentence that opens a city card; explain_choice states the rank itself, so it uses `whyPartners`. */
+function rankSentence(act: Act, city: string, ranked: RankedCity | undefined): string | undefined {
+  if (!ranked) return undefined;
+  if (ranked.noSignal) return `${city}: Qloo has no affinity signal for ${act.name} here (${ranked.note ?? "no signal"}).`;
+  return `${city} is ${liftText(ranked)}: ${(ranked.score * 100).toFixed(1)}% fan affinity on Qloo's ${COUNTRY_QUERY[ranked.country] ?? ranked.country} heatmap (${ranked.cells} cells within 60 km), listener density ${pct(ranked.popularity)}.`;
+}
+
+function whyText(act: Act, city: string, venues: Partner[], recommended: Partner | undefined, brands: Partner[], openers: Partner[], ranked: RankedCity | undefined): { why: string; whyPartners: string } {
   const top = (c?: Contribution[]) => c?.slice().sort((a, b) => b.score - a.score)[0];
   const parts: string[] = [];
-  if (ranked?.noSignal) parts.push(`${city}: Qloo has no affinity signal for ${act.name} here (${ranked.note ?? "no signal"}).`);
-  else if (ranked) parts.push(`${city} is ${liftText(ranked)}: ${(ranked.score * 100).toFixed(1)}% fan affinity on Qloo's ${COUNTRY_QUERY[ranked.country] ?? ranked.country} heatmap (${ranked.cells} cells within 60 km), listener density ${pct(ranked.popularity)}.`);
   if (recommended) {
     const t = top(recommended.explainability);
     const runnerUp = venues.find((v) => v.entity_id !== recommended.entity_id);
@@ -173,7 +178,9 @@ function whyText(act: Act, city: string, venues: Partner[], recommended: Partner
   }
   if (brands[0]) parts.push(`${brands[0].name} (${brands[0].detail}) is the brand this city's audience and the act's fans both over-index on${brands[1] ? `, ahead of ${brands[1].name} (${pct(brands[1].affinity)} vs ${pct(brands[0].affinity)})` : ""}.`);
   if (openers[0]) parts.push(`${openers[0].name} (${openers[0].detail}) is the trending ${act.kind === "person" ? "comic" : "act"} with the highest cross-affinity for this market, ${pct(openers[0].affinity)}.`);
-  return parts.join(" ");
+  const whyPartners = parts.join(" ");
+  const rs = rankSentence(act, city, ranked);
+  return { why: [rs, whyPartners].filter(Boolean).join(" "), whyPartners };
 }
 
 export async function pickPartners(act: Act, city: string, policy: Policy, plan: Plan, qloo: QlooAdapter = getQloo()): Promise<CityPartners> {
@@ -205,7 +212,7 @@ export async function pickPartners(act: Act, city: string, policy: Policy, plan:
   const openerEntities = comedian ? (comedians.length ? comedians : openers.entities.slice(0, 5)) : openers.entities;
   const o = openerEntities.map((e) => partnerFromEntity(e, labels));
   const ranked = plan.candidates.find((x) => x.city === c.name);
-  const result: CityPartners = { city: c.name, venues: v, brands: b, openers: o, recommendedVenue, why: whyText(act, c.name, v, recommendedVenue, b, o, ranked), mode: qloo.mode };
+  const result: CityPartners = { city: c.name, venues: v, brands: b, openers: o, recommendedVenue, ...whyText(act, c.name, v, recommendedVenue, b, o, ranked), mode: qloo.mode };
   plan.partners[c.name] = result;
   touch();
   return result;
@@ -248,6 +255,8 @@ export function makeItinerary(act: Act, plan: Plan, policy: Policy, opts: BuildO
     startDate: dates[0],
     endDate: dates[dates.length - 1],
     estimatedCostUsd: stops.reduce((a, s) => a + (s.venue?.estimatedCostUsd ?? 0), 0),
+    startCity: startIdx >= 0 ? stopsIn[startIdx].c.name : undefined,
+    gapDays: opts.gapDays,
     builtAt: now.toISOString(),
     mode,
   };
@@ -276,7 +285,8 @@ export function explainChoice(plan: Plan, city: string): { city: string; explana
   if (ranked?.noSignal) lines.push(`${ranked.city} is #${ranked.rank} of ${plan.candidates.length} candidates but unscored: ${ranked.note ?? "Qloo has no signal for the act there"}.`);
   else if (ranked) lines.push(`${ranked.city} ranks ${liftText(ranked)} among ${plan.candidates.length} candidates: ${(ranked.score * 100).toFixed(1)}% fan affinity (mean of the ${ranked.topCells.length} strongest cells of Qloo's ${COUNTRY_QUERY[ranked.country] ?? ranked.country} heatmap within 60 km, ${ranked.cells} cells in range; index ${ranked.index}/100 across the candidates), listener density ${pct(ranked.popularity)} (#${ranked.popularityRank}).`);
   if (ranked?.excluded) lines.push(`It is excluded (${ranked.excludedReason ?? "by you"}), so it will not be routed.`);
-  if (p) lines.push(p.why);
+  // The card's first sentence is the same ranking statement as above; keep only the partner sentences here.
+  if (p && (p.whyPartners ?? p.why)) lines.push(p.whyPartners ?? p.why);
   if (contributions.length) lines.push(`Explainability for ${p?.recommendedVenue?.name}: ` + contributions.map((c) => `${c.label ?? c.signal} ${Math.round(c.score * 100)}%`).join(", ") + ".");
   const stop = plan.itinerary?.stops.find((s) => s.city === (ranked?.city ?? city));
   if (stop) lines.push(`Routed as stop ${stop.order} on ${stop.date}${stop.legKm ? `, ${stop.legKm} km from the previous stop` : ""}.`);

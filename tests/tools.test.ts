@@ -138,6 +138,8 @@ describe("actions", () => {
     await pickPartners(act, city, store.policy, plan, fx);
     buildItinerary(act, plan, store.policy, { cities: [city] });
     const after = explainChoice(plan, city);
+    // The ranking statement appears once, not again from the card's why text.
+    expect(after.explanation.match(/by taste/g)?.length).toBe(1);
     expect(after.contributions.length).toBeGreaterThan(0);
     expect(after.explanation).toContain("Explainability");
     expect(after.explanation).toContain("Routed as stop 1");

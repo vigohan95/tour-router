@@ -60,6 +60,8 @@ With no keys at all the whole product runs on fixtures (banner on). With the Qlo
 
 Live probes against the real API (print shapes and counts, never bodies): `npx vitest run --config scripts/vitest.live.config.mts scripts/<name>.live.ts`.
 
+Record screenshots or the demo video (`scripts/screenshots.py`, `scripts/make_video.py`) against a production server (`npm run build && npm run start -- -p 3200`), not `next dev`: Turbopack's dev watcher covers the whole project directory, so the frames those scripts write under `video/` and `docs/screenshots/` trigger full page reloads mid-recording. `AGENTS.md` at the repo root is written by `next dev` itself and is git-ignored.
+
 ## Architecture
 
 ```

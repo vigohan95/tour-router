@@ -28,6 +28,8 @@ describe("exports", () => {
   it("writes a Markdown table that names the data source", () => {
     const md = itineraryToMarkdown(it1);
     expect(md).toContain("# Nova Reyes - 2-stop tour (2027-03-01 to 2027-03-03)");
+    expect(md).toContain("estimated venue cost $9,800");
+    expect(itineraryToMarkdown({ ...it1, estimatedCostUsd: 0 })).not.toContain("venue cost");
     expect(md).toContain("synthetic fixtures");
     expect(md).toContain("| 1 | 2027-03-01 | Austin, US | 81% |");
     expect(md).toContain("| 2 | 2027-03-03 | Dallas, US | 75% | - | - | - | 293 km |");

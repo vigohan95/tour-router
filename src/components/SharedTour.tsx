@@ -110,8 +110,7 @@ export default function SharedTour({ p }: { p: SharePayload }) {
                 {Math.round(p.compare.avgAffinity.delta * 100)} pts)
               </div>
               <div>
-                travel {p.compare.totalKm.plan.toLocaleString("en-US")} km vs {p.compare.totalKm.baseline.toLocaleString("en-US")} km ({p.compare.totalKm.delta >= 0 ? "+" : ""}
-                {p.compare.totalKm.delta.toLocaleString("en-US")} km)
+                travel {p.compare.totalKm.plan.toLocaleString("en-US")} km vs {p.compare.totalKm.baseline.toLocaleString("en-US")} km ({p.compare.totalKm.delta === 0 ? "same" : `${Math.abs(p.compare.totalKm.delta).toLocaleString("en-US")} km ${p.compare.totalKm.delta > 0 ? "more" : "fewer"}`})
               </div>
               {p.compare.openers.gained.length > 0 && <div>openers only taste finds: {p.compare.openers.gained.join(", ")}</div>}
               {p.compare.brands.gained.length > 0 && <div>brands only taste finds: {p.compare.brands.gained.join(", ")}</div>}

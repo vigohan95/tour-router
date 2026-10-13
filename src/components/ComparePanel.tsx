@@ -71,7 +71,7 @@ export default function ComparePanel({ itinerary, compare, busy, onCompare }: { 
                 <td className="pr-3">travel</td>
                 <td className="pr-3">{compare.totalKm.plan.toLocaleString("en-US")} km</td>
                 <td className="pr-3">{compare.totalKm.baseline.toLocaleString("en-US")} km</td>
-                <td className={compare.totalKm.delta <= 0 ? "text-ok" : "text-warn"}>{signed(compare.totalKm.delta, " km")}</td>
+                <td className={compare.totalKm.delta <= 0 ? "text-ok" : "text-warn"}>{compare.totalKm.delta === 0 ? "same" : `${Math.abs(compare.totalKm.delta).toLocaleString("en-US")} km ${compare.totalKm.delta > 0 ? "more" : "fewer"}`}</td>
               </tr>
               <tr>
                 <td className="pr-3">openers</td>

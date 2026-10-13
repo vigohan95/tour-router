@@ -75,8 +75,10 @@ export interface CityPartners {
   openers: Partner[];
   /** The venue the agent recommends (first venue inside the capacity window). */
   recommendedVenue?: Partner;
-  /** One-paragraph "why", written from the explainability contributions. */
+  /** One-paragraph "why", written from the explainability contributions (opens with the ranking sentence). */
   why: string;
+  /** The same without the ranking sentence, for explain_choice (which states the rank itself). */
+  whyPartners?: string;
   mode: DataMode;
 }
 
@@ -102,8 +104,11 @@ export interface Itinerary {
   totalKm: number;
   startDate: string;
   endDate: string;
-  /** Sum of estimated venue costs for the stops that have a venue. */
+  /** Sum of estimated venue costs for the stops that have a cost figure (0 = none known; live Qloo venues carry none). */
   estimatedCostUsd: number;
+  /** The start city the promoter named, if any; a counterfactual baseline must keep it too. */
+  startCity?: string;
+  gapDays?: number;
   builtAt: string;
   mode: DataMode;
 }
