@@ -182,7 +182,9 @@ export function partnerFromEntity(e: InsightEntity, labels: Record<string, strin
       ? (capacity ? `capacity ${capacity.toLocaleString("en-US")}` : (firstString(p.primary_genre, e.subtype?.split(":").at(-1)?.replaceAll("_", " ")) ?? "venue")) + rating
       : e.type === "urn:entity:brand"
         ? (firstString(p.category, p.industries, p.brand_type, e.tags[0]?.split(":").at(-1)) ?? "brand")
-        : (firstString(p.genre, p.primary_genres, e.tags[0]?.split(":").at(-1)) ?? "artist");
+        : e.type === "urn:entity:person"
+          ? (e.tags.find((t) => /stand[- _]?up|comedian/i.test(t)) ?? firstString(p.short_description) ?? "person")
+          : (firstString(p.genre, p.primary_genres, e.tags[0]?.split(":").at(-1)) ?? "artist");
   const explainability = e.explainability?.map((c) => ({ ...c, label: c.label ?? labels[c.signal] }));
   return { entity_id: e.entity_id, name: e.name, affinity: e.affinity, popularity: e.popularity, subtype: e.subtype, address: e.address, lat: e.geo?.latitude, lon: e.geo?.longitude, detail, capacity, estimatedCostUsd: cost, explainability };
 }

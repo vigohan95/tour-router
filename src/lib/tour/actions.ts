@@ -27,7 +27,8 @@ export const TOP_CELLS = 5;
 export const VENUE_TAGS = ["urn:tag:genre:place:live_music_venue", "urn:tag:genre:place:concert_hall", "urn:tag:genre:place:amphitheater", "urn:tag:genre:place:arena", "urn:tag:genre:place:performing_arts_theater"];
 /** Comedians (urn:entity:person) also get comedy clubs. */
 export const COMEDY_VENUE_TAGS = ["urn:tag:genre:place:comedy_club", ...VENUE_TAGS];
-const COMEDY_TAG = /comed|stand[- ]?up/i;
+/** Tag ids / names that mark a comedian ("american_stand_up_comedians", "Comedian", "21st-century American Comedians"); a bare "Comedy" genre tag is not enough (actors in comedies carry it). */
+export const COMEDY_TAG = /stand[- _]?up|comedian/i;
 
 function isComedian(h: SearchHit): boolean {
   return h.types.includes("urn:entity:person") && (h.tagIds ?? []).some((t) => COMEDY_TAG.test(t));
@@ -200,7 +201,8 @@ export async function pickPartners(act: Act, city: string, policy: Policy, plan:
   const recommendedVenue = inWindow[0] ?? v[0];
   const b = brands.entities.map((e) => partnerFromEntity(e, labels));
   // Persons come back as any kind of public figure; keep the ones tagged as comedians (Qloo has no person-type comedian filter that returns results).
-  const openerEntities = comedian ? (openers.entities.filter((e) => e.tags.some((t) => COMEDY_TAG.test(t))).slice(0, 5).length ? openers.entities.filter((e) => e.tags.some((t) => COMEDY_TAG.test(t))).slice(0, 5) : openers.entities.slice(0, 5)) : openers.entities;
+  const comedians = comedian ? openers.entities.filter((e) => e.tags.some((t) => COMEDY_TAG.test(t))).slice(0, 5) : [];
+  const openerEntities = comedian ? (comedians.length ? comedians : openers.entities.slice(0, 5)) : openers.entities;
   const o = openerEntities.map((e) => partnerFromEntity(e, labels));
   const ranked = plan.candidates.find((x) => x.city === c.name);
   const result: CityPartners = { city: c.name, venues: v, brands: b, openers: o, recommendedVenue, why: whyText(act, c.name, v, recommendedVenue, b, o, ranked), mode: qloo.mode };
