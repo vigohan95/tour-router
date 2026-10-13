@@ -27,3 +27,6 @@ next-env.d.ts
 
 # share links generated from live data (names + scores); kept out of the public repo
 /docs/share-links.local.md
+
+# demo video renders (scripts/make_video.py)
+/video/
