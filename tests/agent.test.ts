@@ -48,8 +48,8 @@ describe("agent loop (no keys)", () => {
     expect(r.toolCalls[0]).toBe("resolve_artist");
     expect(r.toolCalls[1]).toBe("rank_cities_by_affinity");
     expect(r.toolCalls.filter((t) => t === "pick_city_partners")).toHaveLength(6);
-    expect(r.toolCalls.at(-1)).toBe("build_itinerary");
-    expect(r.steps).toBe(5); // 4 tool steps + the final text
+    expect(r.toolCalls.slice(-2)).toEqual(["build_itinerary", "compare_plans"]); // the counterfactual follows the first itinerary
+    expect(r.steps).toBe(6); // 5 tool steps + the final text
     const plan = getStore().plan;
     expect(plan.act?.name).toBe("Nova Reyes");
     expect(plan.candidates.length).toBeGreaterThanOrEqual(10);
@@ -60,6 +60,8 @@ describe("agent loop (no keys)", () => {
     expect(r.text).toMatch(/Route for Nova Reyes: 6 stops/);
     expect(r.text).toContain("Why ");
     expect(r.text).toContain("opener:");
+    expect(r.text).toContain("Versus population-only routing");
+    expect(plan.compare?.against).toBe("population");
   });
 
   it("skips excluded cities and stays inside the policy", async () => {
@@ -102,13 +104,18 @@ describe("agent loop (no keys)", () => {
     const why = await runOnce(`Why ${first}?`);
     expect(why.toolCalls).toEqual(["explain_choice"]);
     expect(why.text).toContain(first);
-    expect(why.text).toMatch(/ranked #\d/);
+    expect(why.text).toMatch(/#\d+ by taste/);
     const drop = await runOnce(`Skip ${first}`);
-    expect(drop.toolCalls).toEqual(["exclude_city", "build_itinerary"]);
+    expect(drop.toolCalls).toEqual(["exclude_city", "build_itinerary", "compare_plans"]);
     const stops = getStore().plan.itinerary!.stops.map((s) => s.city);
     expect(stops).toHaveLength(4);
     expect(stops).not.toContain(first);
     expect(drop.text).toContain("1 of 1 cities excluded");
+    expect(drop.text).toContain("Versus the previous route");
+    expect(getStore().plan.compare?.swappedOut.map((s) => s.city)).toEqual([first]);
+    const cmp = await runOnce("Compare with population-only routing");
+    expect(cmp.toolCalls).toEqual(["compare_plans"]);
+    expect(cmp.text).toMatch(/population-only routing/);
     const status = await runOnce("What do we have?");
     expect(status.toolCalls).toEqual([]);
     expect(status.text).toContain("Max Ortega");

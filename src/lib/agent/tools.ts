@@ -6,6 +6,8 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { REGIONS } from "../tour/cities";
 import { buildItinerary, excludeCity, explainChoice, pickPartners, rankCities, resolveArtist, setAct } from "../tour/actions";
+import { compareText, compareWith } from "../tour/compare";
+import { QlooError } from "../qloo/types";
 import type { Region } from "../tour/cities";
 import { evaluateAction, type Evaluation } from "../policy/engine";
 import { audit, getStore } from "../store";
@@ -51,6 +53,8 @@ function guarded<I, O>(name: string, fn: (input: I) => Promise<O>) {
       return out;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      // A Qloo failure is shown as a banner and never papered over with fixtures or guesses.
+      if (e instanceof QlooError || /^Qloo /.test(message)) getStore().plan.lastError = { ts: new Date().toISOString(), message, status: e instanceof QlooError ? e.status : undefined, tool: name };
       logExecution(name, input, ev, undefined, message);
       return { error: message };
     }
@@ -77,7 +81,7 @@ export function buildTools(): ToolSet {
     }),
 
     rank_cities_by_affinity: tool({
-      description: "Rank candidate cities by how strongly their population's taste overlaps the act, using Qloo's geographic heatmap (one call per city, cached). Returns the ranked list with scores; cities on the exclude list are flagged.",
+      description: "Rank candidate cities by fan affinity from ONE Qloo heatmap per country (filter.type=urn:heatmap, filter.location.query=<country>; cached), binned to each city (cells within 60 km, mean of the strongest 5). Returns affinity, a 0-100 index across the candidates, listener density (popularity), metro-size rank and the taste lift (population rank minus taste rank), plus flags for excluded or unscored cities.",
       inputSchema: z.object({
         regions: z.array(z.enum(REGIONS as [string, ...string[]])).optional().describe("Regions to consider; defaults to the policy's regions"),
         limit: z.number().int().min(1).max(60).optional().describe("Keep only the top N"),
@@ -90,7 +94,7 @@ export function buildTools(): ToolSet {
         store.plan.candidates = ranked;
         store.plan.region = (regions as Region[] | undefined) ?? (store.policy.regions as Region[]);
         store.version++;
-        return { act: act.name, count: ranked.length, cities: ranked.map((c) => ({ rank: c.rank, city: c.city, country: c.country, score: c.score, excluded: c.excluded ?? false })) };
+        return { act: act.name, count: ranked.length, cities: ranked.map((c) => ({ rank: c.rank, city: c.city, country: c.country, score: c.score, index: c.index, popularityRank: c.popularityRank, populationRank: c.populationRank, lift: c.lift, excluded: c.excluded ?? false, ...(c.noSignal ? { unscored: c.note ?? "no Qloo signal" } : {}) })) };
       }),
     }),
 
@@ -123,9 +127,21 @@ export function buildTools(): ToolSet {
     }),
 
     explain_choice: tool({
-      description: "Explain why a city is where it is in the plan: its heatmap score and rank, the chosen venue/brand/opener and the explainability contributions behind them.",
+      description: "Explain why a city is where it is in the plan: its Qloo affinity, index and rank, the chosen venue/brand/opener and the explainability contributions behind them.",
       inputSchema: z.object({ city: z.string().min(1) }),
       execute: guarded("explain_choice", async ({ city }) => explainChoice(getStore().plan, city)),
+    }),
+
+    compare_plans: tool({
+      description: "Counterfactual: diff the current itinerary against a baseline with the same stop count - \"population\" (biggest metros, no Qloo), \"popularity\" (Qloo listener density, not affinity) or \"previous\" (the itinerary the last rebuild replaced). Returns swapped-in / swapped-out cities, the change in average fan affinity, km and estimated cost, and the openers / brands gained or lost. Read-only. Call it after exclude_city + build_itinerary (against=previous) and whenever the user asks what Qloo changed.",
+      inputSchema: z.object({ against: z.enum(["population", "popularity", "previous"]).default("population") }),
+      execute: guarded("compare_plans", async ({ against }) => {
+        const store = getStore();
+        const act = requireAct();
+        const r = compareWith(act, store.plan, store.policy, against);
+        store.version++;
+        return { against, label: r.label, swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city), avgAffinity: r.avgAffinity, totalKm: r.totalKm, estimatedCostUsd: r.estimatedCostUsd, openers: r.openers, brands: r.brands, summary: compareText(r, act.name) };
+      }),
     }),
 
     exclude_city: tool({

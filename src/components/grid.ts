@@ -23,4 +23,5 @@ export function useGridTheme() {
 }
 
 export const pct = (v: number | null | undefined) => (v === null || v === undefined || Number.isNaN(v) ? "" : `${Math.round(v * 100)}%`);
+export const pct1 = (v: number | null | undefined) => (v === null || v === undefined || Number.isNaN(v) ? "" : `${(v * 100).toFixed(1)}%`);
 export const usd = (v: number | null | undefined) => (v === null || v === undefined || Number.isNaN(v) ? "" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v));

@@ -7,6 +7,7 @@
  * - A small concurrency limiter so ranking 40+ cities does not fire 40 requests at once.
  * - Errors surface as QlooError with status + body; nothing is retried silently and nothing is invented.
  */
+import { reportCall } from "./calls";
 import { ENTITY_TYPES, QlooError, type Contribution, type EntityType, type HeatmapCell, type HeatmapParams, type HeatmapResult, type InsightEntity, type InsightsParams, type InsightsResult, type QlooAdapter, type SearchHit } from "./types";
 
 type J = Record<string, unknown>;
@@ -19,11 +20,18 @@ export interface LiveOptions {
   apiKey: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
-  /** Max in-flight requests. */
+  /** Max in-flight requests (default 2). */
   concurrency?: number;
+  /** Minimum ms between request starts (default 350). The hackathon key rate-limits bursts: 429s were observed at ~30 rapid calls. */
+  minIntervalMs?: number;
+  /** Retries on 429 / 5xx with exponential backoff (default 3), honouring Retry-After when sent. */
+  maxRetries?: number;
+  /** First backoff wait in ms (default 1500; doubles per attempt). */
+  backoffMs?: number;
   /** Cache TTL in ms; the hackathon key has no time limit on caching, default 7 days. */
   cacheTtlMs?: number;
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface CacheEntry {
@@ -74,6 +82,9 @@ function parseContributions(v: unknown): Contribution[] | undefined {
   push(interests.entities, "");
   push(interests.tags, "");
   push(sig.demographics, "demographics");
+  // Live hackathon API (verified 2026-10-13): flat keys on the entity, e.g.
+  //   query.explainability["signal.interests.entities"] = [{ entity_id, score }]
+  for (const [k, bucket] of Object.entries(ex)) if (k.startsWith("signal.")) push(bucket, k.startsWith("signal.demographics") ? "demographics" : "");
   if (out.length === 0 && Object.keys(ex).length === 0) return undefined;
   return out;
 }
@@ -94,7 +105,8 @@ export function parseEntity(raw: unknown, fallbackType: EntityType): InsightEnti
     entity_id: str(o.entity_id) ?? str(o.id) ?? "",
     name: str(o.name) ?? "",
     type,
-    subtype: str(o.subtype) ?? types.find((t) => t !== type),
+    // Live entities say type="urn:entity", subtype="urn:entity:place"; the useful subtype for places is properties.primary_genre.id.
+    subtype: str(j(props.primary_genre).id) ?? str(o.subtype) ?? types.find((t) => t !== type),
     affinity: num(query.affinity) ?? num(o.affinity) ?? 0,
     popularity: num(o.popularity),
     geo: lat !== undefined && lon !== undefined ? { latitude: lat, longitude: lon } : undefined,
@@ -114,7 +126,9 @@ export function parseSearchHit(raw: unknown): SearchHit {
     name: str(o.name) ?? "",
     types: arr(o.types).map(String),
     popularity: num(o.popularity),
-    hint: str(o.disambiguation) ?? str(props.short_description) ?? (arr(o.tags).map((t) => str(j(t).name)).filter(Boolean).slice(0, 3).join(", ") || undefined),
+    // Live: `disambiguation` repeats the name, so the short description or the first tag names serve as the hint.
+    hint: str(props.short_description)?.slice(0, 120) ?? (arr(o.tags).map((t) => str(j(t).name)).filter(Boolean).slice(0, 3).join(", ") || undefined),
+    tagIds: arr(o.tags).map((t) => str(j(t).id)).filter((t): t is string => !!t),
     raw,
   };
 }
@@ -141,7 +155,12 @@ function locationParams(loc: InsightsParams["location"]): Record<string, string>
 }
 
 export function insightsQuery(p: InsightsParams): Record<string, string> {
-  const q: Record<string, string> = { "filter.type": p.type, "signal.interests.entities": p.signalEntities.join(","), take: String(p.take ?? 10), ...locationParams(p.location) };
+  // Qloo rejects take outside 1..50 on entity insights.
+  const take = Math.min(50, Math.max(1, Math.round(p.take ?? 10)));
+  const q: Record<string, string> = { "filter.type": p.type, take: String(take), ...locationParams(p.location) };
+  if (p.signalEntities.length) q["signal.interests.entities"] = p.signalEntities.join(",");
+  if (p.signalLocation) q["signal.location.query"] = p.signalLocation.query;
+  if (p.resultEntities?.length) q["filter.results.entities"] = p.resultEntities.join(",");
   if (p.tags?.length) q["filter.tags"] = p.tags.join(",");
   if (p.explainability) q["feature.explainability"] = "true";
   if (p.trends) q["bias.trends"] = p.trends;
@@ -161,16 +180,34 @@ export class LiveQloo implements QlooAdapter {
   private readonly limiter: Limiter;
   private readonly ttl: number;
   private readonly now: () => number;
-  /** Counters for the UI / tests: how many requests went to the network vs. the cache. */
-  readonly stats = { requests: 0, cacheHits: 0, errors: 0 };
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly minInterval: number;
+  private readonly maxRetries: number;
+  private readonly backoffMs: number;
+  private nextSlot = 0;
+  /** Counters for the UI / tests: how many requests went to the network vs. the cache, and how many were retried. */
+  readonly stats = { requests: 0, cacheHits: 0, errors: 0, retries: 0 };
 
   constructor(private readonly opts: LiveOptions) {
     if (!opts.apiKey) throw new Error("LiveQloo needs an apiKey (QLOO_API_KEY)");
     this.baseUrl = (opts.baseUrl ?? "https://hackathon.api.qloo.com").replace(/\/+$/, "");
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.limiter = new Limiter(opts.concurrency ?? 4);
+    this.limiter = new Limiter(opts.concurrency ?? 2);
     this.ttl = opts.cacheTtlMs ?? 7 * 24 * 3600_000;
     this.now = opts.now ?? Date.now;
+    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.minInterval = opts.minIntervalMs ?? 350;
+    this.maxRetries = opts.maxRetries ?? 3;
+    this.backoffMs = opts.backoffMs ?? 1500;
+  }
+
+  /** Space request starts by minInterval so a 40-city ranking never bursts past the key's rate limit. */
+  private async pace() {
+    if (this.minInterval <= 0) return;
+    const now = this.now();
+    const at = Math.max(now, this.nextSlot);
+    this.nextSlot = at + this.minInterval;
+    if (at > now) await this.sleep(at - now);
   }
 
   url(path: string, params: Record<string, string>): string {
@@ -184,31 +221,44 @@ export class LiveQloo implements QlooAdapter {
     const hit = this.cache.get(url);
     if (hit && this.now() - hit.at < this.ttl) {
       this.stats.cacheHits++;
+      reportCall({ endpoint: path, params, cached: true, results: countResults(hit.value), mode: "live" });
       return hit.value;
     }
+    const t0 = this.now();
     return this.limiter.run(async () => {
-      this.stats.requests++;
-      let res: Response;
-      try {
-        res = await this.fetchImpl(url, { headers: { "X-Api-Key": this.opts.apiKey, accept: "application/json" } });
-      } catch (e) {
-        this.stats.errors++;
-        throw new QlooError(`Qloo request failed: ${e instanceof Error ? e.message : String(e)}`, 0, redact(url));
+      for (let attempt = 0; ; attempt++) {
+        await this.pace();
+        this.stats.requests++;
+        let res: Response;
+        try {
+          res = await this.fetchImpl(url, { headers: { "X-Api-Key": this.opts.apiKey, accept: "application/json" } });
+        } catch (e) {
+          this.stats.errors++;
+          throw new QlooError(`Qloo request failed: ${e instanceof Error ? e.message : String(e)}`, 0, redact(url));
+        }
+        const text = await res.text();
+        if ((res.status === 429 || res.status >= 500) && attempt < this.maxRetries) {
+          const retryAfter = Number(res.headers.get("retry-after"));
+          const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : this.backoffMs * 2 ** attempt;
+          this.stats.retries++;
+          await this.sleep(wait);
+          continue;
+        }
+        if (!res.ok) {
+          this.stats.errors++;
+          throw new QlooError(`Qloo ${res.status} on ${path}: ${text.slice(0, 200)}`, res.status, redact(url), text);
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          this.stats.errors++;
+          throw new QlooError(`Qloo returned non-JSON on ${path}`, res.status, redact(url), text);
+        }
+        this.cache.set(url, { at: this.now(), value: body });
+        reportCall({ endpoint: path, params, cached: false, status: res.status, ms: this.now() - t0, results: countResults(body), mode: "live" });
+        return body;
       }
-      const text = await res.text();
-      if (!res.ok) {
-        this.stats.errors++;
-        throw new QlooError(`Qloo ${res.status} on ${path}: ${text.slice(0, 200)}`, res.status, redact(url), text);
-      }
-      let body: unknown;
-      try {
-        body = JSON.parse(text);
-      } catch {
-        this.stats.errors++;
-        throw new QlooError(`Qloo returned non-JSON on ${path}`, res.status, redact(url), text);
-      }
-      this.cache.set(url, { at: this.now(), value: body });
-      return body;
     });
   }
 
@@ -234,6 +284,13 @@ export class LiveQloo implements QlooAdapter {
   clearCache() {
     this.cache.clear();
   }
+}
+
+function countResults(body: unknown): number | undefined {
+  const r = j(body).results;
+  if (Array.isArray(r)) return r.length;
+  const o = j(r);
+  return arr(o.entities).length || arr(o.heatmap).length || arr(o.tags).length || undefined;
 }
 
 /** Never let the key leak through an error message or a log line. */

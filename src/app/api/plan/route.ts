@@ -2,12 +2,14 @@ import { errorResponse, readBody, stateResponse, withSnapshot } from "@/lib/api"
 import { evaluateAction } from "@/lib/policy/engine";
 import { audit } from "@/lib/store";
 import { buildItinerary, excludeCity } from "@/lib/tour/actions";
+import { compareWith } from "@/lib/tour/compare";
 
 /**
  * Direct plan edits from the grid (the human's own decisions, so no approval card; the policy still refuses
  * excluded cities so the grid and the agent cannot disagree).
  *   { op: "exclude", city, excluded, reason? }
  *   { op: "rebuild", cities: string[], keepOrder?: boolean, startCity?, startDate?, gapDays? }
+ *   { op: "compare", against?: "population" | "popularity" | "previous" }
  */
 export async function POST(req: Request) {
   const body = await readBody(req);
@@ -38,6 +40,13 @@ export async function POST(req: Request) {
           gapDays: typeof body.gapDays === "number" ? body.gapDays : undefined,
         });
         audit({ actor: "user", tool: "build_itinerary", action: `${body.keepOrder ? "Re-ordered" : "Re-routed"} ${it.stops.length} stops`, decision: ev.decision === "approve" ? "approved" : "allowed", reason: ev.decision === "approve" ? `You did this yourself. ${ev.reason}` : ev.reason, rule: ev.rule });
+        return stateResponse();
+      }
+      if (body.op === "compare") {
+        if (!store.plan.act) return errorResponse(new Error("No act selected"));
+        const against = body.against === "popularity" || body.against === "previous" ? body.against : "population";
+        const r = compareWith(store.plan.act, store.plan, store.policy, against);
+        audit({ actor: "user", tool: "compare_plans", action: `Compared with ${r.label}`, decision: "info", output: { swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city) } });
         return stateResponse();
       }
       return errorResponse(new Error("Unknown op"));

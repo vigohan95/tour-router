@@ -24,3 +24,6 @@ next-env.d.ts
 
 # local Qloo response cache (rules: no Qloo response data in the public repo)
 /.cache/
+
+# share links generated from live data (names + scores); kept out of the public repo
+/docs/share-links.local.md

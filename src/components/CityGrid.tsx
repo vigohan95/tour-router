@@ -4,7 +4,7 @@ import { AgGridReact } from "ag-grid-react";
 import type { CellValueChangedEvent, ColDef, ICellRendererParams, RowClassRules } from "ag-grid-community";
 import { useCallback, useMemo, useState } from "react";
 import type { Itinerary, RankedCity } from "@/lib/tour/types";
-import { pct, useGridTheme } from "./grid";
+import { pct1, useGridTheme } from "./grid";
 
 interface Row extends RankedCity {
   stop: number | null;
@@ -12,14 +12,17 @@ interface Row extends RankedCity {
   venue: string;
 }
 
+/** Bar = 0..100 index across the candidates; text = Qloo's raw affinity (one decimal, the gaps are small). */
 function ScoreBar(p: ICellRendererParams<Row, number>) {
+  if (p.data?.noSignal) return <span className="text-xs text-muted">unscored</span>;
+  const index = p.data?.index ?? 0;
   const v = p.value ?? 0;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" title={`Qloo affinity ${(v * 100).toFixed(2)}%; index ${index}/100 across the ranked candidates`}>
       <div className="h-2 w-20 overflow-hidden rounded bg-border">
-        <div className="h-full bg-accent" style={{ width: `${Math.round(v * 100)}%` }} />
+        <div className="h-full bg-accent" style={{ width: `${index}%` }} />
       </div>
-      <span className="tabular-nums">{pct(v)}</span>
+      <span className="tabular-nums">{pct1(v)}</span>
     </div>
   );
 }
@@ -62,10 +65,11 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
         },
       },
       { field: "country", headerName: "Country", width: 90 },
-      { field: "score", headerName: "Fan affinity", width: 160, cellRenderer: ScoreBar },
+      { field: "score", headerName: "Fan affinity", width: 170, cellRenderer: ScoreBar, headerTooltip: "Qloo's affinity of the act toward this city's population; bar = index across the candidates" },
+      { field: "index", headerName: "Index", width: 80, headerTooltip: "0-100 across the ranked candidates (min-max of the Qloo affinity)" },
       { field: "venue", headerName: "Venue", flex: 1, minWidth: 160 },
-      { field: "cells", headerName: "Cells", width: 80, headerTooltip: "Heatmap cells sampled for this market" },
-      { field: "excludedReason", headerName: "Why excluded", width: 160 },
+      { field: "cells", headerName: "Heat cells", width: 100, headerTooltip: "Qloo heatmap cells mapped for this city (fetched when its partners are picked)" },
+      { headerName: "Note", width: 200, valueGetter: (p) => p.data?.excludedReason ?? p.data?.note ?? "" },
       { headerName: "", width: 80, sortable: false, filter: false, cellRenderer: (p: ICellRendererParams<Row>) => (p.data ? <button className="text-xs text-accent underline" onClick={() => onAsk(`Why ${p.data!.city}?`)}>why?</button> : null) },
     ],
     [onAsk],
@@ -97,7 +101,7 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
     return (
       <div className="card text-sm text-muted">
         <div className="text-sm font-semibold text-foreground">2. Markets</div>
-        <p className="mt-1">No cities ranked yet. Select an act and ask the agent to plan the tour; it ranks every candidate market by Qloo heatmap affinity.</p>
+        <p className="mt-1">No cities ranked yet. Select an act and ask the agent to plan the tour; it asks Qloo, city by city, how much that population cares about the act.</p>
       </div>
     );
   }
@@ -107,7 +111,7 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm font-semibold">2. Markets</div>
         <input value={quick} onChange={(e) => setQuick(e.target.value)} placeholder="Filter cities" className="w-48 rounded-md border border-border bg-background px-3 py-1 text-sm outline-none focus:border-accent" />
-        <span className="text-xs text-muted">{candidates.length} ranked by heatmap affinity. Tick Exclude to drop a city; edit Stop to re-order the route.</span>
+        <span className="text-xs text-muted">{candidates.length} ranked by Qloo affinity. Tick Exclude to drop a city; edit Stop to re-order the route.</span>
       </div>
       <div className="min-h-0 flex-1">
         <AgGridReact<Row>

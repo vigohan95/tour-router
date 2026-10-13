@@ -138,10 +138,11 @@ export function parseStartDate(text: string, now = new Date()): string | undefin
   return undefined;
 }
 
-export type Intent = "plan" | "explain" | "exclude" | "status" | "help";
+export type Intent = "plan" | "explain" | "exclude" | "compare" | "status" | "help";
 
 export function detectIntent(text: string): Intent {
   const t = text.toLowerCase();
+  if (/\b(compare|counterfactual|what if|without qloo|ignored? taste|population[- ]only|by population|popularity[- ]only|what did qloo change|baseline)\b/.test(t)) return "compare";
   if (/\b(why|explain|reason|how come)\b/.test(t)) return "explain";
   if (/\b(skip|avoid|drop|exclude|remove|not|without|no)\b/.test(t) && parseCities(text).length > 0) return "exclude";
   if (/\b(plan|route|book|tour|itinerary|cities|stops|where should|run)\b/.test(t) || parseAct(text)) return "plan";
@@ -207,7 +208,8 @@ function planPlaybook(turn: Turn): Action {
   const ranked = first(turn, "rank_cities_by_affinity");
   if (!ranked) {
     const region = parseRegion(text);
-    const input: J = { limit: Math.min(60, Math.max(wanted * 2, wanted + 4)) };
+    // A named start city must be in the ranked pool whatever its taste rank, so rank everything in that case.
+    const input: J = { limit: parseStartCity(text) ? 60 : Math.min(60, Math.max(wanted * 2, wanted + 4)) };
     if (region) input.regions = [region satisfies Region];
     return { type: "calls", calls: [{ toolName: "rank_cities_by_affinity", input }] };
   }
@@ -239,7 +241,20 @@ function planPlaybook(turn: Turn): Action {
   }
   const bo = outcome(build);
   if (bo) return { type: "text", text: `Itinerary not built - ${bo}. Ask for fewer stops, raise maxCities / budgetPerCity in the policy, or approve the card above.` };
-  return { type: "text", text: summaryText(turn, build) };
+  // 5. counterfactual: what did taste change versus routing by metro size?
+  const cmp = first(turn, "compare_plans");
+  if (!cmp) return { type: "calls", calls: [{ toolName: "compare_plans", input: { against: "population" } }] };
+  const co = outcome(cmp);
+  return { type: "text", text: `${summaryText(turn, build)}\n${co ? `(Comparison with population-only routing not available: ${co}.)` : `Versus population-only routing: ${s(cmp.output.summary)}`}` };
+}
+
+function comparePlaybook(turn: Turn): Action {
+  const t = turn.userText.toLowerCase();
+  const against = /previous|last|before/.test(t) ? "previous" : /popularity|listener|density/.test(t) ? "popularity" : "population";
+  const r = first(turn, "compare_plans");
+  if (!r) return { type: "calls", calls: [{ toolName: "compare_plans", input: { against } }] };
+  const o = outcome(r);
+  return { type: "text", text: o ? `I could not compare: ${o}.` : s(r.output.summary) };
 }
 
 function explainPlaybook(turn: Turn): Action {
@@ -264,11 +279,15 @@ function excludePlaybook(turn: Turn): Action {
     .filter((c) => c && !cities.includes(c));
   const build = first(turn, "build_itinerary");
   if (!build && remaining.length > 0) return { type: "calls", calls: [{ toolName: "build_itinerary", input: { cities: remaining } }] };
+  // What did the skip cost? Compare the rebuilt route with the one it replaced.
+  const cmp = first(turn, "compare_plans");
+  if (build && !outcome(build) && !cmp) return { type: "calls", calls: [{ toolName: "compare_plans", input: { against: "previous" } }] };
   const failed = done.filter((r) => r.denied || r.error);
   const head = `${done.length - failed.length} of ${done.length} cities excluded${failed.length ? ` (${failed.map((r) => `${s(r.input.city)}: ${r.denied ?? r.error}`).join("; ")})` : ""}.`;
   if (build) {
     const bo = outcome(build);
-    return { type: "text", text: bo ? `${head} Itinerary not rebuilt - ${bo}.` : `${head}\n${summaryText(turn, build)}` };
+    const cmpText = cmp && !outcome(cmp) ? `\nVersus the previous route: ${s(cmp.output.summary)}` : "";
+    return { type: "text", text: bo ? `${head} Itinerary not rebuilt - ${bo}.` : `${head}\n${summaryText(turn, build)}${cmpText}` };
   }
   return { type: "text", text: `${head} There is no itinerary yet; ask me to plan the tour.` };
 }
@@ -294,6 +313,8 @@ export function plan(turn: Turn): Action {
       return explainPlaybook(turn);
     case "exclude":
       return excludePlaybook(turn);
+    case "compare":
+      return comparePlaybook(turn);
     case "status":
       return { type: "text", text: statusText(turn) };
     default:

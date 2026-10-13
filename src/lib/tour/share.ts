@@ -1,0 +1,183 @@
+/**
+ * Shareable read-only tour page: the plan is compressed into the URL (`/t/<payload>`, lz-string), so a judge
+ * opens a finished plan with no agent run, no LLM quota and no server state.
+ *
+ * The payload carries names, scores and labels only: no Qloo entity ids, no raw responses, no audit inputs.
+ */
+import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from "lz-string";
+import type { AuditEntry } from "../store";
+import type { Policy } from "../policy/schema";
+import type { CompareResult, DataModeLike, Partner, Plan, QlooCall } from "./types";
+
+export const SHARE_VERSION = 1;
+
+export interface SharedPartner {
+  name: string;
+  detail?: string;
+  affinity: number;
+  capacity?: number;
+  explain?: Array<{ label: string; score: number }>;
+}
+
+export interface SharedStop {
+  order: number;
+  city: string;
+  country: string;
+  lat: number;
+  lon: number;
+  date: string;
+  score: number;
+  lift?: number;
+  rank?: number;
+  populationRank?: number;
+  legKm: number;
+  venue?: SharedPartner;
+  opener?: SharedPartner;
+  brand?: SharedPartner;
+  why?: string;
+}
+
+export interface SharedCandidate {
+  city: string;
+  country: string;
+  score: number;
+  popularity: number;
+  rank: number;
+  popularityRank: number;
+  populationRank: number;
+  lift: number;
+  excluded?: boolean;
+  noSignal?: boolean;
+}
+
+export interface SharedCompare {
+  against: CompareResult["against"];
+  label: string;
+  swappedIn: string[];
+  swappedOut: string[];
+  avgAffinity: CompareResult["avgAffinity"];
+  totalKm: CompareResult["totalKm"];
+  openers: CompareResult["openers"];
+  brands: CompareResult["brands"];
+  baselineStops: Array<{ order: number; city: string; score: number }>;
+}
+
+export interface SharePayload {
+  v: number;
+  act: { name: string; kind?: "artist" | "person"; hint?: string };
+  mode: DataModeLike;
+  generatedAt: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  totalKm: number;
+  estimatedCostUsd: number;
+  stops: SharedStop[];
+  candidates: SharedCandidate[];
+  compare?: SharedCompare;
+  policy: { maxCities: number; budgetPerCity: number; regions: string[]; excludeCities: string[]; venue: { minCapacity: number; maxCapacity: number }; minGapDays: number };
+  audit: { allowed: number; approved: number; denied: number; approvalRequired: number; errors: number; lines: string[] };
+  qloo: { calls: number; cached: number; endpoints: Array<{ endpoint: string; type: string; n: number }> };
+}
+
+const partner = (p?: Partner): SharedPartner | undefined =>
+  p
+    ? {
+        name: p.name,
+        detail: p.detail,
+        affinity: p.affinity,
+        capacity: p.capacity,
+        explain: p.explainability
+          ?.slice()
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .map((c) => ({ label: c.label ?? c.signal.split(":").at(-1) ?? "signal", score: c.score })),
+      }
+    : undefined;
+
+/** Build the payload from the studio state. Pure. */
+export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[], now = new Date()): SharePayload {
+  const it = plan.itinerary;
+  if (!it) throw new Error("Build an itinerary before sharing.");
+  const ranked = new Map(plan.candidates.map((c) => [c.city, c]));
+  const stops: SharedStop[] = it.stops.map((s) => {
+    const r = ranked.get(s.city);
+    return { order: s.order, city: s.city, country: s.country, lat: s.lat, lon: s.lon, date: s.date, score: s.score, lift: r?.lift, rank: r?.rank, populationRank: r?.populationRank, legKm: s.legKm, venue: partner(s.venue), opener: partner(s.opener), brand: partner(s.brand), why: plan.partners[s.city]?.why };
+  });
+  const candidates: SharedCandidate[] = plan.candidates.slice(0, 40).map((c) => ({ city: c.city, country: c.country, score: c.score, popularity: c.popularity, rank: c.rank, popularityRank: c.popularityRank, populationRank: c.populationRank, lift: c.lift, excluded: c.excluded, noSignal: c.noSignal }));
+  const cmp = plan.compare;
+  const compare: SharedCompare | undefined = cmp
+    ? { against: cmp.against, label: cmp.label, swappedIn: cmp.swappedIn.map((s) => s.city), swappedOut: cmp.swappedOut.map((s) => s.city), avgAffinity: cmp.avgAffinity, totalKm: cmp.totalKm, openers: cmp.openers, brands: cmp.brands, baselineStops: cmp.baseline.stops.map((s) => ({ order: s.order, city: s.city, score: s.score })) }
+    : undefined;
+  const count = (d: AuditEntry["decision"]) => audit.filter((a) => a.decision === d).length;
+  const endpoints = new Map<string, { endpoint: string; type: string; n: number }>();
+  for (const c of plan.calls) {
+    const type = c.params["filter.type"] ?? "";
+    const key = `${c.endpoint}|${type}`;
+    const e = endpoints.get(key) ?? { endpoint: c.endpoint, type, n: 0 };
+    e.n++;
+    endpoints.set(key, e);
+  }
+  return {
+    v: SHARE_VERSION,
+    act: { name: it.act.name, kind: it.act.kind, hint: it.act.hint },
+    mode: it.mode,
+    generatedAt: now.toISOString(),
+    title: `${it.act.name} - ${it.stops.length}-stop tour`,
+    startDate: it.startDate,
+    endDate: it.endDate,
+    totalKm: it.totalKm,
+    estimatedCostUsd: it.estimatedCostUsd,
+    stops,
+    candidates,
+    compare,
+    policy: { maxCities: policy.maxCities, budgetPerCity: policy.budgetPerCity, regions: policy.regions, excludeCities: policy.excludeCities, venue: policy.venue, minGapDays: policy.minGapDays },
+    audit: {
+      allowed: count("allowed"),
+      approved: count("approved"),
+      denied: count("denied"),
+      approvalRequired: count("approval-required"),
+      errors: count("error"),
+      lines: audit
+        .filter((a) => a.decision !== "info")
+        .slice(0, 12)
+        .map((a) => `${a.decision}: ${a.action}${a.rule ? ` [${a.rule}]` : ""}`),
+    },
+    qloo: { calls: plan.calls.length, cached: plan.calls.filter((c) => c.cached).length, endpoints: [...endpoints.values()] },
+  };
+}
+
+export function encodeShare(payload: SharePayload): string {
+  return compressToEncodedURIComponent(JSON.stringify(payload));
+}
+
+export function decodeShare(encoded: string): SharePayload | undefined {
+  try {
+    const json = decompressFromEncodedURIComponent(encoded);
+    if (!json) return undefined;
+    const p = JSON.parse(json) as SharePayload;
+    if (!p || typeof p !== "object" || p.v !== SHARE_VERSION || !Array.isArray(p.stops) || !p.act?.name) return undefined;
+    return p;
+  } catch {
+    return undefined;
+  }
+}
+
+export function sharePath(payload: SharePayload): string {
+  return `/t/${encodeShare(payload)}`;
+}
+
+/** Summary of the Qloo calls for the provenance panel, grouped by endpoint + filter.type. */
+export function summarizeCalls(calls: QlooCall[]): Array<{ endpoint: string; type: string; params: string[]; n: number; cached: number }> {
+  const out = new Map<string, { endpoint: string; type: string; params: Set<string>; n: number; cached: number }>();
+  for (const c of calls) {
+    const type = c.params["filter.type"] ?? "";
+    const key = `${c.endpoint}|${type}`;
+    const e = out.get(key) ?? { endpoint: c.endpoint, type, params: new Set<string>(), n: 0, cached: 0 };
+    for (const k of Object.keys(c.params)) if (k !== "filter.type") e.params.add(k);
+    e.n++;
+    if (c.cached) e.cached++;
+    out.set(key, e);
+  }
+  return [...out.values()].map((e) => ({ ...e, params: [...e.params].sort() }));
+}

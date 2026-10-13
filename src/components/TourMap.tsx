@@ -27,12 +27,12 @@ export default function TourMap({ candidates, itinerary }: { candidates: RankedC
       <FitBounds points={all} />
       {candidates.map((c) => {
         const stop = routed.get(c.city);
-        const r = 4 + c.score * 10;
+        const r = 4 + (c.index / 100) * 10;
         const color = c.excluded ? "#9ca3af" : stop ? "#b4532a" : "#2563eb";
         return (
           <CircleMarker key={c.city} center={[c.lat, c.lon]} radius={stop ? r + 2 : r} pathOptions={{ color, fillColor: color, fillOpacity: stop ? 0.9 : 0.45, weight: stop ? 2 : 1 }}>
             <Tooltip direction="top" offset={[0, -4]} className="stop-label" permanent={!!stop}>
-              {stop ? `${stop.order}. ${c.city}` : `${c.city} ${Math.round(c.score * 100)}%${c.excluded ? " (excluded)" : ""}`}
+              {stop ? `${stop.order}. ${c.city}` : `${c.city} ${c.noSignal ? "unscored" : `${(c.score * 100).toFixed(1)}%`}${c.excluded ? " (excluded)" : ""}`}
             </Tooltip>
           </CircleMarker>
         );

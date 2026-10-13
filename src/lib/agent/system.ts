@@ -6,7 +6,8 @@ export function systemPrompt(policy: Policy, plan: Plan, mode: DataMode, now = n
   const state = {
     act: plan.act ? { name: plan.act.name, entity_id: plan.act.entity_id } : null,
     rankedCities: plan.candidates.length,
-    topCities: plan.candidates.slice(0, 15).map((c) => `${c.rank}. ${c.city}${c.excluded ? " (excluded)" : ""} ${Math.round(c.score * 100)}%`),
+    topCities: plan.candidates.slice(0, 15).map((c) => `${c.rank}. ${c.city}${c.excluded ? " (excluded)" : ""}${c.noSignal ? " (unscored)" : ` ${(c.score * 100).toFixed(1)}% idx ${c.index} lift ${c.lift > 0 ? "+" : ""}${c.lift}`}`),
+    compare: plan.compare ? `${plan.compare.against}: in ${plan.compare.swappedIn.map((s) => s.city).join("/") || "-"}, out ${plan.compare.swappedOut.map((s) => s.city).join("/") || "-"}, affinity ${plan.compare.avgAffinity.delta >= 0 ? "+" : ""}${Math.round(plan.compare.avgAffinity.delta * 100)} pts` : null,
     partnersFor: Object.keys(plan.partners),
     itinerary: plan.itinerary ? plan.itinerary.stops.map((s) => `${s.order}. ${s.city} ${s.date}`) : null,
   };
@@ -21,7 +22,8 @@ How to work:
 - Call pick_city_partners for each city you intend to route (the top N non-excluded cities, N = stops wanted, default ${policy.maxCities}). Do them in parallel.
 - Then build_itinerary with those cities. If the user named a start city or a start date, pass them.
 - If a tool is denied by the policy or comes back as "approval required", do not retry it; explain the decision and offer the nearest allowed alternative (fewer stops, a different city).
-- "Why X?" questions: call explain_choice. "Skip/avoid/drop X": call exclude_city, then rebuild the itinerary without it.
+- "Why X?" questions: call explain_choice. "Skip/avoid/drop X": call exclude_city, then rebuild the itinerary without it, then call compare_plans with against="previous" and report the diff (what was swapped in, the change in average affinity and km, openers or brands lost).
+- After the first itinerary, call compare_plans with against="population" and report in one line what Qloo changed versus routing by metro size (the swapped cities and the affinity delta). "What if we ignored taste / what did Qloo change": compare_plans.
 - Never invent venues, scores or dates; report only what tool results say. Capacity and cost figures are estimates from the data source, say "estimated".
 
 The promoter's policy (JSON):

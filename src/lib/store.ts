@@ -7,6 +7,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { qlooMode } from "./qloo";
+import { callSink } from "./qloo/calls";
 import { DEFAULT_POLICY, parsePolicy, type Policy } from "./policy/schema";
 import { emptyPlan, type Plan } from "./tour/types";
 
@@ -36,6 +37,18 @@ declare global {
 }
 
 const als = new AsyncLocalStorage<Store>();
+
+/** Keep at most this many Qloo call records per plan (a 40-city ranking + 8 cities of partners is ~30). */
+const MAX_CALLS = 400;
+
+// Every Qloo request (live or fixture) lands on the plan of the request that made it: "Qloo calls behind this plan".
+callSink.handler = (c) => {
+  const s = als.getStore() ?? globalThis.__tourRouterStore;
+  if (!s) return;
+  if (!Array.isArray(s.plan.calls)) s.plan.calls = [];
+  s.plan.calls.push({ ts: new Date().toISOString(), ...c });
+  if (s.plan.calls.length > MAX_CALLS) s.plan.calls.splice(0, s.plan.calls.length - MAX_CALLS);
+};
 
 export function createStore(now = new Date(), policy?: Policy): Store {
   return {
@@ -79,6 +92,7 @@ export function hydrateSnapshot(raw: unknown): Store {
   plan.mode = qlooMode();
   plan.candidates = Array.isArray(plan.candidates) ? plan.candidates : [];
   plan.partners = plan.partners && typeof plan.partners === "object" ? plan.partners : {};
+  plan.calls = Array.isArray(plan.calls) ? plan.calls.slice(-MAX_CALLS) : [];
   return { policy, plan, audit: Array.isArray(s.audit) ? s.audit.slice(0, 500) : fresh.audit, version: typeof s.version === "number" ? s.version : 0, createdAt: typeof s.createdAt === "string" ? s.createdAt : fresh.createdAt };
 }
 

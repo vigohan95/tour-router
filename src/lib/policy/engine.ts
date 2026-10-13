@@ -18,7 +18,7 @@ export interface EvaluationContext {
 }
 
 /** Tools that only read Qloo or local state. They never need approval. */
-export const READ_ONLY_TOOLS = ["resolve_artist", "rank_cities_by_affinity", "explain_choice"];
+export const READ_ONLY_TOOLS = ["resolve_artist", "rank_cities_by_affinity", "explain_choice", "compare_plans"];
 
 export function isReadOnlyTool(name: string): boolean {
   return READ_ONLY_TOOLS.includes(name);

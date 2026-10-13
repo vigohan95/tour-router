@@ -2,11 +2,15 @@
  * The tour plan the agent builds up. This is what the UI renders and what the browser carries as a snapshot.
  */
 import type { Contribution, DataMode, HeatmapCell, InsightEntity } from "../qloo/types";
+
+export type DataModeLike = DataMode;
 import type { Region } from "./cities";
 
 export interface Act {
   entity_id: string;
   name: string;
+  /** Qloo entity type: musicians are urn:entity:artist, comedians / hosts are urn:entity:person. */
+  kind?: "artist" | "person";
   hint?: string;
   popularity?: number;
 }
@@ -17,14 +21,32 @@ export interface RankedCity {
   region: Region;
   lat: number;
   lon: number;
-  /** Aggregated affinity 0..1 (mean of the top heatmap cells). */
+  /**
+   * Fan affinity 0..1: mean of the strongest heatmap cells within HEATMAP_RADIUS_KM of the city, read from ONE
+   * country-wide `urn:heatmap` for the act (Qloo min-max normalises affinity inside the queried area, so cells
+   * from one country-wide map are comparable across its cities; per-city maps are not). 0 when no cell is in range.
+   */
   score: number;
-  /** How many heatmap cells backed the score. */
+  /** Qloo heatmap `popularity` of the same cells (0..1): where the act's listeners are dense, in volume. */
+  popularity: number;
+  /** How many heatmap cells fell within range of this city. */
   cells: number;
-  /** The strongest cells, kept for the map. */
+  /** The strongest cells, kept for the map and the explanation. */
   topCells: HeatmapCell[];
-  /** 1-based rank at the time of ranking. */
+  /** `score` rescaled 0..100 across the ranked candidates (min-max), so small affinity gaps read at a glance. */
+  index: number;
+  /** 1-based rank by `score` at the time of ranking. */
   rank: number;
+  /** 1-based rank by heatmap `popularity`. */
+  popularityRank: number;
+  /** 1-based rank by metro population (cities.ts, public figures). */
+  populationRank: number;
+  /** Taste lift = populationRank - rank: positive means taste says more than size does. */
+  lift: number;
+  /** No heatmap cell within range: Qloo has no signal for the act around this city. */
+  noSignal?: boolean;
+  /** Short note shown in the grid ("no Qloo signal", country normalisation...). */
+  note?: string;
   /** User (or policy) excluded this city; it stays visible but is never routed. */
   excluded?: boolean;
   excludedReason?: string;
@@ -86,29 +108,81 @@ export interface Itinerary {
   mode: DataMode;
 }
 
+/** One Qloo request made for this plan (provenance panel + share page). Entity ids are redacted to a prefix. */
+export interface QlooCall {
+  ts: string;
+  endpoint: string;
+  /** Parameter names with redacted values (entity ids -> first 8 chars, everything else verbatim). */
+  params: Record<string, string>;
+  /** Served from the private server-side cache. */
+  cached: boolean;
+  status?: number;
+  ms?: number;
+  /** Result count (entities or heatmap cells). */
+  results?: number;
+  mode: DataMode;
+}
+
+export interface CompareResult {
+  /** What the taste-driven itinerary was compared against. */
+  against: "population" | "popularity" | "previous";
+  label: string;
+  /** Cities routed in the taste plan but not in the baseline. */
+  swappedIn: Stop[];
+  /** Cities in the baseline but not in the taste plan. */
+  swappedOut: Stop[];
+  avgAffinity: { plan: number; baseline: number; delta: number };
+  totalKm: { plan: number; baseline: number; delta: number };
+  estimatedCostUsd: { plan: number; baseline: number; delta: number };
+  /** Openers / brands that only the taste plan carries, and ones only the baseline carries. */
+  openers: { gained: string[]; lost: string[] };
+  brands: { gained: string[]; lost: string[] };
+  baseline: Itinerary;
+  computedAt: string;
+}
+
 export interface Plan {
   act?: Act;
   region?: Region[];
   candidates: RankedCity[];
   partners: Record<string, CityPartners>;
   itinerary?: Itinerary;
+  /** The itinerary before the last rebuild (for compare_plans "previous"). */
+  previousItinerary?: Itinerary;
+  /** Last counterfactual comparison (population / popularity baseline or the previous itinerary). */
+  compare?: CompareResult;
+  /** Qloo requests behind this plan, newest last (capped). */
+  calls: QlooCall[];
+  /** The last Qloo failure; shown as a banner. Nothing is ever substituted for a failed call. */
+  lastError?: { ts: string; message: string; status?: number; tool?: string };
   mode: DataMode;
 }
 
 export function emptyPlan(mode: DataMode): Plan {
-  return { candidates: [], partners: {}, mode };
+  return { candidates: [], partners: {}, calls: [], mode };
 }
 
-export function partnerFromEntity(e: InsightEntity): Partner {
-  const capacity = typeof e.properties.capacity === "number" ? e.properties.capacity : undefined;
-  const cost = typeof e.properties.estimated_rent_usd === "number" ? e.properties.estimated_rent_usd : undefined;
+const firstString = (...vals: unknown[]): string | undefined => {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v;
+    if (Array.isArray(v) && typeof v[0] === "string" && v[0].trim()) return v[0];
+    if (v && typeof v === "object" && typeof (v as { name?: unknown }).name === "string") return (v as { name: string }).name;
+  }
+  return undefined;
+};
+
+/** Flatten a Qloo entity into what the cards and exports show. Field names follow the live API (verified 2026-10-13). */
+export function partnerFromEntity(e: InsightEntity, labels: Record<string, string> = {}): Partner {
+  const p = e.properties;
+  const capacity = typeof p.capacity === "number" ? p.capacity : undefined;
+  const cost = typeof p.estimated_rent_usd === "number" ? p.estimated_rent_usd : undefined;
+  const rating = typeof p.business_rating === "number" ? ` ${p.business_rating.toFixed(1)}*` : "";
   const detail =
     e.type === "urn:entity:place"
-      ? capacity
-        ? `capacity ${capacity.toLocaleString("en-US")}`
-        : e.subtype?.split(":").at(-1)?.replaceAll("_", " ")
+      ? (capacity ? `capacity ${capacity.toLocaleString("en-US")}` : (firstString(p.primary_genre, e.subtype?.split(":").at(-1)?.replaceAll("_", " ")) ?? "venue")) + rating
       : e.type === "urn:entity:brand"
-        ? String(e.properties.category ?? e.tags[0]?.split(":").at(-1) ?? "brand")
-        : String(e.properties.genre ?? e.tags[0]?.split(":").at(-1) ?? "artist");
-  return { entity_id: e.entity_id, name: e.name, affinity: e.affinity, popularity: e.popularity, subtype: e.subtype, address: e.address, lat: e.geo?.latitude, lon: e.geo?.longitude, detail, capacity, estimatedCostUsd: cost, explainability: e.explainability };
+        ? (firstString(p.category, p.industries, p.brand_type, e.tags[0]?.split(":").at(-1)) ?? "brand")
+        : (firstString(p.genre, p.primary_genres, e.tags[0]?.split(":").at(-1)) ?? "artist");
+  const explainability = e.explainability?.map((c) => ({ ...c, label: c.label ?? labels[c.signal] }));
+  return { entity_id: e.entity_id, name: e.name, affinity: e.affinity, popularity: e.popularity, subtype: e.subtype, address: e.address, lat: e.geo?.latitude, lon: e.geo?.longitude, detail, capacity, estimatedCostUsd: cost, explainability };
 }

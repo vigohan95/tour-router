@@ -6,8 +6,8 @@ import { REGIONS } from "../tour/cities";
  * the edges, and is refused beyond them. Every decision cites the field it came from.
  */
 export const PolicySchema = z.object({
-  /** Hard cap on cities in one itinerary; a bigger request asks you first. */
-  maxCities: z.number().int().min(1).max(40).default(12),
+  /** Hard cap on cities in one itinerary; a bigger request asks you first. Default 6, so an 8-city brief shows the approval card. */
+  maxCities: z.number().int().min(1).max(40).default(6),
   /** Estimated venue cost per city (USD) the agent may commit to on its own; above it the stop asks you. */
   budgetPerCity: z.number().min(0).default(30000),
   /** Cities the agent must never route (already played, embargoed, no visa...). Case-insensitive names. */

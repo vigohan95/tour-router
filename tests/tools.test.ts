@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { buildTools } from "@/lib/agent/tools";
 import { parsePolicy } from "@/lib/policy/schema";
 import { FixtureQloo } from "@/lib/qloo/fixture";
-import { aggregateHeatmap, buildItinerary, excludeCity, explainChoice, pickPartners, rankCities, resolveArtist, setAct } from "@/lib/tour/actions";
+import { TOP_CELLS, aggregateHeatmap, buildItinerary, cellsNear, excludeCity, explainChoice, indexScores, pickPartners, rankCities, resolveArtist, setAct } from "@/lib/tour/actions";
+import type { SearchHit } from "@/lib/qloo/types";
 import { getStore, resetStore } from "@/lib/store";
 
 const fx = new FixtureQloo();
@@ -20,7 +21,7 @@ describe("actions", () => {
     expect(r.hits[0]).toMatchObject(act);
   });
 
-  it("ranks cities from heatmaps inside the policy regions and flags exclusions", async () => {
+  it("ranks cities from one heatmap per country, binned to the cities, with popularity, size ranks and taste lift", async () => {
     const policy = parsePolicy({ excludeCities: ["Phoenix"] });
     const ranked = await rankCities(act, policy, { limit: 10 }, fx);
     expect(ranked).toHaveLength(10);
@@ -28,15 +29,63 @@ describe("actions", () => {
     expect(ranked.every((c) => c.region === "North America")).toBe(true);
     const scores = ranked.map((c) => c.score);
     expect(scores).toEqual([...scores].sort((a, b) => b - a));
-    expect(ranked[0].topCells.length).toBeGreaterThan(0);
+    expect(ranked[0].index).toBe(100);
+    expect(ranked[0].cells).toBeGreaterThan(0);
+    expect(ranked[0].topCells.length).toBeLessThanOrEqual(TOP_CELLS);
+    expect(ranked[0].score).toBe(aggregateHeatmap(ranked[0].topCells));
+    // The score is the mean of the strongest country-heatmap cells within 60 km of the city.
+    const us = await fx.heatmap({ signalEntities: [act.entity_id], location: { query: "United States" } });
+    const first = ranked.find((c) => c.country === "US")!;
+    expect(first.score).toBe(aggregateHeatmap(cellsNear(first, us.cells)));
+    expect(fx.stats.requests).toBeGreaterThan(0);
+    // Three countries in North America -> three heatmap calls, not one per city.
+    const before = fx.stats.requests;
+    await rankCities(act, policy, {}, fx);
+    expect(fx.stats.requests - before).toBe(3);
     const all = await rankCities(act, policy, {}, fx);
     expect(all.find((c) => c.city === "Phoenix")).toMatchObject({ excluded: true, excludedReason: "policy.excludeCities" });
+    // Ranks: taste rank is the position; population rank comes from metro size; lift is the difference.
+    const ny = all.find((c) => c.city === "Mexico City")!;
+    expect(ny.populationRank).toBe(1);
+    expect(ny.lift).toBe(1 - ny.rank);
+    expect(all.every((c) => c.lift === c.populationRank - c.rank)).toBe(true);
+    expect(new Set(all.map((c) => c.popularityRank)).size).toBe(all.length);
+    expect(all.filter((c) => !c.noSignal).every((c) => c.popularity > 0 && c.note?.startsWith("normalised within"))).toBe(true);
+    // Cities Qloo has no signal for sort last, unscored, and say so (never a fake 0 without a note).
+    const unscored = all.filter((c) => c.noSignal);
+    expect(unscored.length).toBeGreaterThan(0);
+    expect(unscored.every((c) => c.index === 0 && c.score === 0 && c.note?.includes("no Qloo signal"))).toBe(true);
+    expect(all.indexOf(unscored[0])).toBeGreaterThan(all.length - unscored.length - 1);
     const only = await rankCities(act, policy, { only: ["Austin", "Dallas", "nowhere"] }, fx);
     expect(only.map((c) => c.city).sort()).toEqual(["Austin", "Dallas"]);
+    expect(only.every((c) => c.note === undefined || !c.note.startsWith("normalised"))).toBe(true);
     const eu = await rankCities(act, policy, { regions: ["Europe"], limit: 3 }, fx);
     expect(eu.every((c) => c.region === "Europe")).toBe(true);
+    expect(indexScores([{ score: 0.9 }, { score: 0.5 }, { score: 0.7 }, { score: 0, noSignal: true }]).map((r) => r.index)).toEqual([100, 0, 50, 0]);
+    expect(indexScores([{ score: 0.9 }]).map((r) => r.index)).toEqual([100]);
     expect(aggregateHeatmap([{ affinity: 0.9 }, { affinity: 0.1 }, { affinity: 0.5 }], 2)).toBe(0.7);
     expect(aggregateHeatmap([])).toBe(0);
+  });
+
+  it("keeps a country's cities visible, unscored and annotated when Qloo errors on its heatmap", async () => {
+    const flaky = { ...fx, mode: "fixture" as const, search: fx.search.bind(fx), insights: fx.insights.bind(fx), heatmap: async (p: Parameters<typeof fx.heatmap>[0]) => ("query" in p.location && p.location.query === "United States" ? Promise.reject(new Error("429 rate limit")) : fx.heatmap(p)) };
+    const ranked = await rankCities(act, parsePolicy({}), { only: ["Austin", "Toronto"] }, flaky);
+    expect(ranked.map((c) => c.city)).toEqual(["Toronto", "Austin"]);
+    expect(ranked[1]).toMatchObject({ noSignal: true, score: 0, index: 0, note: expect.stringContaining("Qloo error: 429") });
+  });
+
+  it("resolves comedians to their person entity and musicians to their artist entity", async () => {
+    const search = async (): Promise<SearchHit[]> => [
+      { entity_id: "P1", name: "John Mulaney", types: ["urn:entity:person"], popularity: 0.97, tagIds: ["urn:tag:wikipedia_category:qloo:american_stand_up_comedians"], hint: "Actor, Comedy" },
+      { entity_id: "A1", name: "John Mulaney", types: ["urn:entity:artist"], popularity: 0.96, tagIds: ["urn:tag:genre:music:comedy"] },
+      { entity_id: "P2", name: "Taylor Swift", types: ["urn:entity:person"], popularity: 1, tagIds: ["urn:tag:occupation:musician"] },
+      { entity_id: "A2", name: "Taylor Swift", types: ["urn:entity:artist"], popularity: 1, hint: "American singer-songwriter" },
+      { entity_id: "A3", name: "Taylor Swift, Bon Iver", types: ["urn:entity:artist"], popularity: 0.6 },
+    ];
+    const r = await resolveArtist("x", { mode: "fixture", search, insights: fx.insights.bind(fx), heatmap: fx.heatmap.bind(fx) });
+    expect(r.hits.map((h) => `${h.name}:${h.kind}:${h.entity_id}`)).toEqual(["John Mulaney:person:P1", "Taylor Swift:artist:A2", "Taylor Swift, Bon Iver:artist:A3"]);
+    expect(r.hits[0].hint).toBe("comedian - Actor, Comedy");
+    expect(r.hits[1].hint).toBe("artist - American singer-songwriter");
   });
 
   it("picks venues inside the capacity window with explainability and writes a why", async () => {
@@ -85,7 +134,7 @@ describe("actions", () => {
     const city = plan.candidates[0].city;
     expect(() => explainChoice(plan, "Atlantis")).toThrow();
     const before = explainChoice(plan, city.toLowerCase());
-    expect(before.explanation).toContain("ranked #1");
+    expect(before.explanation).toContain("#1 by taste");
     await pickPartners(act, city, store.policy, plan, fx);
     buildItinerary(act, plan, store.policy, { cities: [city] });
     const after = explainChoice(plan, city);

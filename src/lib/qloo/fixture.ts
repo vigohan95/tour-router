@@ -8,7 +8,8 @@
  *
  * Shapes match the live adapter exactly (same parse path), so a key swaps the data source and nothing else.
  */
-import { CITIES, findCity, type City } from "../tour/cities";
+import { CITIES, COUNTRY_QUERY, findCity, type City } from "../tour/cities";
+import { reportCall } from "./calls";
 import type { Contribution, EntityType, HeatmapParams, HeatmapResult, InsightEntity, InsightsParams, InsightsResult, QlooAdapter, SearchHit } from "./types";
 
 /* ---------------- deterministic randomness ---------------- */
@@ -61,9 +62,11 @@ const BRAND_NAMES = ["Northline Coffee", "Halo Hard Seltzer", "Saltwater Denim",
 const BRAND_CATEGORY = ["coffee", "beverage", "apparel", "audio", "outdoor", "food", "energy drink", "eyewear", "stationery", "cycling", "skincare", "beer"];
 const OPENER_FIRST = ["Juno", "Cass", "Rio", "Mabel", "Tide", "Vesper", "Oriel", "Sage", "Harlow", "Nico", "Wren", "Ash"];
 const OPENER_LAST = ["Vale", "Marlow", "& The Static", "Okafor", "Frost", "Delgado", "Lune", "Hollis", "Ritter", "Ng", "Paxton", "Sol"];
-const PLACE_TAGS = ["urn:tag:genre:place:music_venue", "urn:tag:genre:place:bar", "urn:tag:genre:place:restaurant", "urn:tag:genre:place:nightclub"];
+const PLACE_TAGS = ["urn:tag:genre:place:live_music_venue", "urn:tag:genre:place:bar", "urn:tag:genre:place:restaurant", "urn:tag:genre:place:night_club"];
 
 export const FIXTURE_ID_PREFIX = "fx:";
+/** Every synthetic venue / brand / opener name carries this suffix so nobody mistakes it for a real place. */
+export const SYNTHETIC = " (synthetic)";
 
 export function fixtureArtistId(name: string): string {
   return `${FIXTURE_ID_PREFIX}artist:${slug(name)}`;
@@ -110,7 +113,7 @@ function resolveCity(loc: InsightsParams["location"]): City {
 
 function venue(city: City, artistId: string, i: number, explain: boolean, signals: string[]): InsightEntity {
   const seed = `${artistId}|${city.name}|venue|${i}`;
-  const name = i === 0 ? `${city.name} ${pick(seed, VENUE_SUFFIX)}` : `${pick(seed + "p", VENUE_PREFIX)} ${pick(seed + "s", VENUE_SUFFIX)}`;
+  const name = (i === 0 ? `${city.name} ${pick(seed, VENUE_SUFFIX)}` : `${pick(seed + "p", VENUE_PREFIX)} ${pick(seed + "s", VENUE_SUFFIX)}`) + SYNTHETIC;
   const capacity = [900, 1400, 1800, 2200, 2800, 3500, 4200, 5500, 7500][hash(seed + "cap") % 9];
   const affinity = Number(Math.max(0.2, cityAffinity(artistId, city) - i * 0.06 + unit(seed) * 0.08).toFixed(3));
   const rentUsd = Math.round((capacity * (3 + unit(seed + "rent") * 3)) / 100) * 100; // 3-6 USD per seat, synthetic
@@ -118,12 +121,12 @@ function venue(city: City, artistId: string, i: number, explain: boolean, signal
     entity_id: `${FIXTURE_ID_PREFIX}place:${slug(city.name)}:${slug(name)}`,
     name,
     type: "urn:entity:place",
-    subtype: "urn:entity:place:music_venue",
+    subtype: "urn:entity:place",
     affinity,
     popularity: Number((0.4 + unit(seed + "pop") * 0.5).toFixed(3)),
     geo: { latitude: city.lat + (unit(seed + "lat") - 0.5) * 0.08, longitude: city.lon + (unit(seed + "lon") - 0.5) * 0.08 },
     address: `${100 + (hash(seed + "addr") % 900)} ${pick(seed + "st", ["Main St", "Market St", "Union Ave", "Harbor Rd", "5th Ave", "King St"])}, ${city.name}`,
-    properties: { capacity, estimated_rent_usd: rentUsd, synthetic: true },
+    properties: { capacity, estimated_rent_usd: rentUsd, primary_genre: { id: PLACE_TAGS[0], name: "Live music venue" }, business_rating: Number((3.8 + unit(seed + "rating") * 1.2).toFixed(1)), synthetic: true },
     tags: [PLACE_TAGS[0], ...(unit(seed + "bar") > 0.5 ? [PLACE_TAGS[1]] : [])],
     explainability: explain ? contributions(signals, affinity, seed) : undefined,
   };
@@ -132,7 +135,7 @@ function venue(city: City, artistId: string, i: number, explain: boolean, signal
 function brand(city: City, artistId: string, i: number, explain: boolean, signals: string[]): InsightEntity {
   const seed = `${artistId}|${city.name}|brand|${i}`;
   const idx = (hash(seed) + i * 5) % BRAND_NAMES.length;
-  const name = BRAND_NAMES[idx];
+  const name = BRAND_NAMES[idx] + SYNTHETIC;
   const affinity = Number(Math.max(0.15, cityAffinity(artistId, city) - 0.05 - i * 0.05 + unit(seed) * 0.1).toFixed(3));
   return {
     entity_id: `${FIXTURE_ID_PREFIX}brand:${slug(name)}`,
@@ -149,7 +152,7 @@ function brand(city: City, artistId: string, i: number, explain: boolean, signal
 
 function opener(city: City | undefined, artistId: string, i: number, explain: boolean, signals: string[], trends?: string): InsightEntity {
   const seed = `${artistId}|${city?.name ?? "global"}|opener|${i}`;
-  const name = `${pick(seed + "f", OPENER_FIRST)} ${pick(seed + "l", OPENER_LAST)}`;
+  const name = `${pick(seed + "f", OPENER_FIRST)} ${pick(seed + "l", OPENER_LAST)}${SYNTHETIC}`;
   const a = artistFor(artistId);
   const affinity = Number(Math.max(0.2, 0.75 - i * 0.07 + unit(seed) * 0.1 + (trends === "high" ? 0.05 : 0)).toFixed(3));
   return {
@@ -171,13 +174,14 @@ export class FixtureQloo implements QlooAdapter {
 
   constructor(private readonly latencyMs = 0) {}
 
-  private async tick() {
+  private async tick(endpoint = "/v2/insights", params: Record<string, string> = {}, results?: number) {
     this.stats.requests++;
+    reportCall({ endpoint, params, cached: false, status: 200, ms: this.latencyMs, results, mode: "fixture" });
     if (this.latencyMs > 0) await new Promise((r) => setTimeout(r, this.latencyMs));
   }
 
   async search(query: string, types: EntityType[] = ["urn:entity:artist"], take = 8): Promise<SearchHit[]> {
-    await this.tick();
+    await this.tick("/search", { query, types: types.join(","), take: String(take) });
     const q = query.trim().toLowerCase();
     if (!q) return [];
     const hits: SearchHit[] = [];
@@ -199,10 +203,23 @@ export class FixtureQloo implements QlooAdapter {
   }
 
   async insights(p: InsightsParams): Promise<InsightsResult> {
-    await this.tick();
+    await this.tick("/v2/insights", { "filter.type": p.type, ...(p.signalEntities.length ? { "signal.interests.entities": p.signalEntities.join(",") } : {}), ...(p.location && "query" in p.location ? { "filter.location.query": p.location.query } : {}), ...(p.signalLocation ? { "signal.location.query": p.signalLocation.query } : {}), ...(p.tags?.length ? { "filter.tags": p.tags.join(",") } : {}), take: String(p.take ?? 10) });
     const take = p.take ?? 10;
     const explain = !!p.explainability;
     const signals = p.signalEntities;
+    if (p.resultEntities?.length) {
+      // "How much does this locality's population care about these entities?" (signal.location.query + filter.results.entities)
+      const loc = p.signalLocation ? resolveCity({ query: p.signalLocation.query }) : p.location ? resolveCity(p.location) : CITIES[0];
+      const entities = p.resultEntities
+        // ~5% of (act, city) pairs come back empty, like Qloo does when it has no signal for the act in that locality.
+        .filter((id) => unit(`${id}|${loc.name}|signal`) >= 0.05)
+        .map((id): InsightEntity => {
+          const a = artistFor(id);
+          const affinity = cityAffinity(id, loc);
+          return { entity_id: id, name: a.name, type: "urn:entity:artist", subtype: "urn:entity:artist", affinity, popularity: Number((0.5 + unit(id) * 0.45).toFixed(3)), properties: { genre: a.genre, synthetic: true }, tags: [`urn:tag:genre:music:${slug(a.genre)}`], explainability: explain ? [{ signal: `locality:${loc.name}`, label: loc.name, score: affinity }] : undefined };
+        });
+      return { entities, query: { fixture: true, params: p } };
+    }
     const artistId = signals[0] ?? "fx:artist:unknown";
     const city = p.location ? resolveCity(p.location) : undefined;
     let entities: InsightEntity[];
@@ -217,9 +234,23 @@ export class FixtureQloo implements QlooAdapter {
   }
 
   async heatmap(p: HeatmapParams): Promise<HeatmapResult> {
-    await this.tick();
-    const city = resolveCity(p.location);
+    await this.tick("/v2/insights", { "filter.type": "urn:heatmap", "signal.interests.entities": p.signalEntities.join(","), ...("query" in p.location ? { "filter.location.query": p.location.query } : { "filter.location": `POINT(${p.location.longitude} ${p.location.latitude})` }) });
     const artistId = p.signalEntities[0] ?? "fx:artist:unknown";
+    // Country-wide map (what rankCities asks for): a few cells around every catalogue city of that country,
+    // on one shared scale, like the live API's geohash grid. Most cities get cells; a few get none (no signal).
+    const locQuery = "query" in p.location ? p.location.query.toLowerCase() : undefined;
+    const country = locQuery ? Object.entries(COUNTRY_QUERY).find(([, name]) => name.toLowerCase() === locQuery)?.[0] : undefined;
+    if (country) {
+      const cells = CITIES.filter((c) => c.country === country && unit(`${artistId}|${c.name}|signal`) >= 0.12).flatMap((c) => {
+        const base = cityAffinity(artistId, c);
+        return Array.from({ length: 4 }, (_, i) => {
+          const seed = `${artistId}|${c.name}|ccell|${i}`;
+          return { latitude: Number((c.lat + (unit(seed + "lat") - 0.5) * 0.4).toFixed(4)), longitude: Number((c.lon + (unit(seed + "lon") - 0.5) * 0.4).toFixed(4)), affinity: Number(Math.min(0.99, Math.max(0.02, base + (unit(seed) - 0.5) * 0.2)).toFixed(3)), popularity: Number(Math.min(0.99, (Math.min(c.metroM, 10) / 10) * 0.7 + unit(seed + "pop") * 0.3).toFixed(3)) };
+        });
+      });
+      return { cells, raw: { fixture: true, country } };
+    }
+    const city = resolveCity(p.location);
     const base = cityAffinity(artistId, city);
     const n = Math.min(p.take ?? 24, 48);
     const cells = Array.from({ length: n }, (_, i) => {

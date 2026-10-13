@@ -11,7 +11,7 @@ const ctx = { policy: DEFAULT_POLICY, plan: planWith() };
 
 describe("policy schema", () => {
   it("has sane defaults and merges partials", () => {
-    expect(DEFAULT_POLICY).toMatchObject({ maxCities: 12, budgetPerCity: 30000, regions: ["North America"], venue: { minCapacity: 1500, maxCapacity: 5000 }, approvals: { itinerary: "auto" } });
+    expect(DEFAULT_POLICY).toMatchObject({ maxCities: 6, budgetPerCity: 30000, regions: ["North America"], venue: { minCapacity: 1500, maxCapacity: 5000 }, approvals: { itinerary: "auto" } });
     const p = parsePolicy({ maxCities: 6, excludeCities: ["Denver"], venue: { maxCapacity: 3000 } });
     expect(p.maxCities).toBe(6);
     expect(p.venue).toEqual({ minCapacity: 1500, maxCapacity: 3000 });
@@ -24,7 +24,7 @@ describe("policy schema", () => {
 
 describe("evaluateAction", () => {
   it("allows read-only tools", () => {
-    for (const t of ["resolve_artist", "rank_cities_by_affinity", "explain_choice"]) {
+    for (const t of ["resolve_artist", "rank_cities_by_affinity", "explain_choice", "compare_plans"]) {
       expect(isReadOnlyTool(t)).toBe(true);
       expect(evaluateAction(t, {}, ctx).decision).toBe("allow");
     }
@@ -43,15 +43,15 @@ describe("evaluateAction", () => {
     expect(evaluateAction("pick_city_partners", { city: "Austin" }, { ...ctx, policy }).decision).toBe("allow");
     expect(evaluateAction("pick_city_partners", { city: "phoenix" }, { ...ctx, policy })).toMatchObject({ decision: "deny", rule: "excludeCities" });
     expect(evaluateAction("build_itinerary", { cities: ["Austin", "Phoenix"] }, { ...ctx, policy })).toMatchObject({ decision: "deny", reason: expect.stringContaining("Phoenix") });
-    const plan = planWith({ candidates: [{ city: "Denver", country: "US", region: "North America", lat: 0, lon: 0, score: 0.5, cells: 1, topCells: [], rank: 1, excluded: true, excludedReason: "played last year" }] });
+    const plan = planWith({ candidates: [{ city: "Denver", country: "US", region: "North America", lat: 0, lon: 0, score: 0.5, popularity: 0.5, cells: 3, topCells: [], index: 50, rank: 1, popularityRank: 1, populationRank: 1, lift: 0, excluded: true, excludedReason: "played last year" }] });
     expect(evaluateAction("pick_city_partners", { city: "Denver" }, { policy: DEFAULT_POLICY, plan })).toMatchObject({ decision: "deny", rule: "grid.excluded" });
     expect(evaluateAction("build_itinerary", { cities: ["Denver"] }, { policy: DEFAULT_POLICY, plan }).decision).toBe("deny");
   });
 
   it("asks over the city cap and over the per-city budget, allows inside", () => {
-    const cities = Array.from({ length: 13 }, (_, i) => `C${i}`);
+    const cities = Array.from({ length: 7 }, (_, i) => `C${i}`);
     expect(evaluateAction("build_itinerary", { cities }, ctx)).toMatchObject({ decision: "approve", rule: "maxCities" });
-    expect(evaluateAction("build_itinerary", { cities: cities.slice(0, 12) }, ctx)).toMatchObject({ decision: "allow", rule: "maxCities" });
+    expect(evaluateAction("build_itinerary", { cities: cities.slice(0, 6) }, ctx)).toMatchObject({ decision: "allow", rule: "maxCities" });
     const plan = planWith({ partners: { Austin: { city: "Austin", venues: [], brands: [], openers: [], recommendedVenue: { entity_id: "v", name: "Big Hall", affinity: 0.8, estimatedCostUsd: 40000 }, why: "", mode: "fixture" } } });
     expect(evaluateAction("build_itinerary", { cities: ["Austin", "Dallas"] }, { policy: DEFAULT_POLICY, plan })).toMatchObject({ decision: "approve", rule: "budgetPerCity", reason: expect.stringContaining("Austin") });
     const rich = parsePolicy({ budgetPerCity: 50000 });
