@@ -215,8 +215,9 @@ function planPlaybook(turn: Turn): Action {
   }
   const ro = outcome(ranked);
   if (ro) return { type: "text", text: `I could not rank cities: ${ro}.` };
+  // Excluded cities are refused by the policy; unscored ones (no Qloo signal) are never routed on a guess.
   const cities = arr(ranked.output.cities)
-    .filter((c) => !c.excluded)
+    .filter((c) => !c.excluded && !c.unscored)
     .map((c) => s(c.city));
   const mentioned = parseCities(text);
   const avoid = /\b(skip|avoid|without|except|not)\b/i.test(text) ? mentioned : [];
@@ -224,7 +225,7 @@ function planPlaybook(turn: Turn): Action {
   // A named start city is part of the tour whatever its rank, as long as it is a ranked, non-excluded candidate.
   const pool = cities.filter((c) => !avoid.includes(c));
   const chosen = startCity && pool.includes(startCity) ? [startCity, ...pool.filter((c) => c !== startCity)].slice(0, wanted) : pool.slice(0, wanted);
-  if (chosen.length === 0) return { type: "text", text: "Every candidate city is excluded by your policy; relax the exclude list or regions and ask again." };
+  if (chosen.length === 0) return { type: "text", text: arr(ranked.output.cities).some((c) => c.unscored) ? `Qloo has no heatmap signal for ${s(j(turn.state.act).name) || "this act"} in these regions (every candidate came back unscored), so I will not route on a guess. Try another region, or the act's other entity (musician vs comedian).` : "Every candidate city is excluded by your policy; relax the exclude list or regions and ask again." };
   // 3. partners for each chosen city, in parallel
   const partners = has(turn, "pick_city_partners");
   if (partners.length === 0) return { type: "calls", calls: chosen.map((city) => ({ toolName: "pick_city_partners", input: { city } })) };

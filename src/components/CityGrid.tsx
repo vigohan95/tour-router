@@ -4,7 +4,7 @@ import { AgGridReact } from "ag-grid-react";
 import type { CellValueChangedEvent, ColDef, ICellRendererParams, RowClassRules } from "ag-grid-community";
 import { useCallback, useMemo, useState } from "react";
 import type { Itinerary, RankedCity } from "@/lib/tour/types";
-import { pct1, useGridTheme } from "./grid";
+import { pct, pct1, useGridTheme } from "./grid";
 
 interface Row extends RankedCity {
   stop: number | null;
@@ -12,18 +12,30 @@ interface Row extends RankedCity {
   venue: string;
 }
 
-/** Bar = 0..100 index across the candidates; text = Qloo's raw affinity (one decimal, the gaps are small). */
+/** Bar = 0..100 index across the candidates; text = Qloo's affinity (one decimal). */
 function ScoreBar(p: ICellRendererParams<Row, number>) {
   if (p.data?.noSignal) return <span className="text-xs text-muted">unscored</span>;
   const index = p.data?.index ?? 0;
   const v = p.value ?? 0;
   return (
-    <div className="flex items-center gap-2" title={`Qloo affinity ${(v * 100).toFixed(2)}%; index ${index}/100 across the ranked candidates`}>
+    <div className="flex items-center gap-2" title={`Qloo heatmap affinity ${(v * 100).toFixed(2)}% (mean of the strongest cells within 60 km, one country-wide map); index ${index}/100 across the ranked candidates`}>
       <div className="h-2 w-20 overflow-hidden rounded bg-border">
         <div className="h-full bg-accent" style={{ width: `${index}%` }} />
       </div>
       <span className="tabular-nums">{pct1(v)}</span>
     </div>
+  );
+}
+
+/** Taste lift = population rank - taste rank. Warm = taste says more than size; cool = a big metro the fans care less about. */
+function LiftCell(p: ICellRendererParams<Row, number>) {
+  if (p.data?.noSignal) return null;
+  const v = p.value ?? 0;
+  const tone = v > 0 ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" : v < 0 ? "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200" : "text-muted";
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone}`} title={`#${p.data?.rank} by taste vs #${p.data?.populationRank} by metro size`}>
+      {v > 0 ? `+${v}` : v}
+    </span>
   );
 }
 
@@ -38,7 +50,7 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
 
   const columnDefs = useMemo<ColDef<Row>[]>(
     () => [
-      { field: "rank", headerName: "#", width: 60, pinned: "left", sort: "asc" },
+      { field: "rank", headerName: "#", width: 60, pinned: "left", sort: "asc", headerTooltip: "Rank by fan affinity (taste)" },
       { field: "city", headerName: "City", width: 140, pinned: "left" },
       {
         field: "stop",
@@ -65,10 +77,13 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
         },
       },
       { field: "country", headerName: "Country", width: 90 },
-      { field: "score", headerName: "Fan affinity", width: 170, cellRenderer: ScoreBar, headerTooltip: "Qloo's affinity of the act toward this city's population; bar = index across the candidates" },
-      { field: "index", headerName: "Index", width: 80, headerTooltip: "0-100 across the ranked candidates (min-max of the Qloo affinity)" },
+      { field: "score", headerName: "Fan affinity", width: 170, cellRenderer: ScoreBar, headerTooltip: "Qloo heatmap affinity of the act's fans around this city (one country-wide heatmap, cells within 60 km); bar = index across the candidates" },
+      { field: "lift", headerName: "Taste lift", width: 100, cellRenderer: LiftCell, headerTooltip: "Population rank minus taste rank: +N = this city matters more for the act than its size suggests; -N = a big metro whose population cares less" },
+      { field: "populationRank", headerName: "Size #", width: 80, headerTooltip: "Rank by metro population (public figures, not Qloo)" },
+      { field: "popularity", headerName: "Listeners", width: 100, valueFormatter: (p) => (p.data?.noSignal ? "" : pct(p.value)), headerTooltip: "Qloo heatmap popularity of the same cells: how dense the act's listeners are here (volume, not over-index)" },
+      { field: "popularityRank", headerName: "Listeners #", width: 100, headerTooltip: "Rank by listener density" },
       { field: "venue", headerName: "Venue", flex: 1, minWidth: 160 },
-      { field: "cells", headerName: "Heat cells", width: 100, headerTooltip: "Qloo heatmap cells mapped for this city (fetched when its partners are picked)" },
+      { field: "cells", headerName: "Heat cells", width: 100, headerTooltip: "Qloo heatmap cells within 60 km of the city that back the score" },
       { headerName: "Note", width: 200, valueGetter: (p) => p.data?.excludedReason ?? p.data?.note ?? "" },
       { headerName: "", width: 80, sortable: false, filter: false, cellRenderer: (p: ICellRendererParams<Row>) => (p.data ? <button className="text-xs text-accent underline" onClick={() => onAsk(`Why ${p.data!.city}?`)}>why?</button> : null) },
     ],
@@ -101,17 +116,20 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
     return (
       <div className="card text-sm text-muted">
         <div className="text-sm font-semibold text-foreground">2. Markets</div>
-        <p className="mt-1">No cities ranked yet. Select an act and ask the agent to plan the tour; it asks Qloo, city by city, how much that population cares about the act.</p>
+        <p className="mt-1">No cities ranked yet. Select an act and ask the agent to plan the tour; it reads one Qloo heatmap per country for the act and scores every candidate city from the cells around it.</p>
       </div>
     );
   }
 
+  const countries = new Set(candidates.map((c) => c.country));
   return (
-    <div className="card flex h-[420px] flex-col gap-2">
+    <div className="card flex h-[440px] flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-sm font-semibold">2. Markets</div>
         <input value={quick} onChange={(e) => setQuick(e.target.value)} placeholder="Filter cities" className="w-48 rounded-md border border-border bg-background px-3 py-1 text-sm outline-none focus:border-accent" />
-        <span className="text-xs text-muted">{candidates.length} ranked by Qloo affinity. Tick Exclude to drop a city; edit Stop to re-order the route.</span>
+        <span className="text-xs text-muted">
+          {candidates.length} ranked by Qloo fan affinity{countries.size > 1 ? ` (normalised within each of ${countries.size} countries)` : ""}. <b>Taste lift</b> = size rank minus taste rank. Tick Exclude to drop a city; edit Stop to re-order the route.
+        </span>
       </div>
       <div className="min-h-0 flex-1">
         <AgGridReact<Row>

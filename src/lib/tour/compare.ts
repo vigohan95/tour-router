@@ -9,14 +9,9 @@ import type { Policy } from "../policy/schema";
 import { CITIES } from "./cities";
 import { makeItinerary, type BuildOptions } from "./actions";
 import type { Act, CompareResult, Itinerary, Plan, RankedCity, Stop } from "./types";
+import { BASELINE_LABEL } from "./compare-text";
 
 export type BaselineMode = "population" | "popularity";
-
-export const BASELINE_LABEL: Record<CompareResult["against"], string> = {
-  population: "population-only routing (biggest metros, no Qloo)",
-  popularity: "popularity-only routing (Qloo listener density, not affinity)",
-  previous: "the previous itinerary",
-};
 
 /** The `n` non-excluded candidates a promoter would pick with no taste data: by metro size, or by raw listener density. */
 export function baselineCities(candidates: RankedCity[], n: number, mode: BaselineMode): string[] {
@@ -28,7 +23,7 @@ export function baselineCities(candidates: RankedCity[], n: number, mode: Baseli
 
 const round = (n: number, d = 3) => Number(n.toFixed(d));
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-const names = (stops: Stop[], pick: (s: Stop) => string | undefined) => stops.map(pick).filter((x): x is string => !!x);
+const names = (stops: Stop[], pick: (s: Stop) => string | undefined) => [...new Set(stops.map(pick).filter((x): x is string => !!x))];
 const diff = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
 
 /** Stop-by-stop diff of the taste plan against a baseline itinerary. */
@@ -79,15 +74,4 @@ export function compareWith(act: Act, plan: Plan, policy: Policy, against: Compa
   return result;
 }
 
-/** One-paragraph summary for the agent and the share page. */
-export function compareText(r: CompareResult, actName: string): string {
-  const pp = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n * 100)} pts`;
-  const km = (n: number) => `${n >= 0 ? "+" : ""}${n.toLocaleString("en-US")} km`;
-  const parts = [`Against ${r.label}: ${r.swappedIn.length ? `taste swaps in ${r.swappedIn.map((s) => s.city).join(", ")}` : "the same cities"}${r.swappedOut.length ? ` and drops ${r.swappedOut.map((s) => s.city).join(", ")}` : ""}.`];
-  parts.push(`Average fan affinity ${Math.round(r.avgAffinity.plan * 100)}% vs ${Math.round(r.avgAffinity.baseline * 100)}% (${pp(r.avgAffinity.delta)}), travel ${r.totalKm.plan.toLocaleString("en-US")} km vs ${r.totalKm.baseline.toLocaleString("en-US")} km (${km(r.totalKm.delta)}).`);
-  if (r.openers.gained.length) parts.push(`Openers only the taste route carries: ${r.openers.gained.join(", ")}.`);
-  if (r.brands.gained.length) parts.push(`Brands only the taste route carries: ${r.brands.gained.join(", ")}.`);
-  if (r.openers.lost.length || r.brands.lost.length) parts.push(`Given up: ${[...r.openers.lost, ...r.brands.lost].join(", ")}.`);
-  if (r.swappedIn.length === 0 && r.swappedOut.length === 0) parts.push(`For ${actName}, taste and ${r.against} agree on the cities here.`);
-  return parts.join(" ");
-}
+export { compareText } from "./compare-text";

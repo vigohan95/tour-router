@@ -44,6 +44,8 @@ describe("share payload", () => {
     expect(path.startsWith("/t/")).toBe(true);
     expect(path.length).toBeLessThan(12_000);
     expect(decodeShare(path.slice(3))).toEqual(payload);
+    // Route params can arrive percent-encoded (`$` -> `%24`).
+    expect(decodeShare(encodeURIComponent(path.slice(3)))).toEqual(payload);
     expect(decodeShare("not-a-payload")).toBeUndefined();
     expect(decodeShare(encodeShare({ ...payload, v: 99 }))).toBeUndefined();
   });

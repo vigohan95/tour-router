@@ -128,7 +128,8 @@ export function parseSearchHit(raw: unknown): SearchHit {
     popularity: num(o.popularity),
     // Live: `disambiguation` repeats the name, so the short description or the first tag names serve as the hint.
     hint: str(props.short_description)?.slice(0, 120) ?? (arr(o.tags).map((t) => str(j(t).name)).filter(Boolean).slice(0, 3).join(", ") || undefined),
-    tagIds: arr(o.tags).map((t) => str(j(t).id)).filter((t): t is string => !!t),
+    // /search tags carry `id` or `tag_id` (and always `name`); keep whichever exists so comedians can be told from musicians.
+    tagIds: arr(o.tags).map((t) => str(j(t).id) ?? str(j(t).tag_id) ?? str(j(t).name)).filter((t): t is string => !!t),
     raw,
   };
 }

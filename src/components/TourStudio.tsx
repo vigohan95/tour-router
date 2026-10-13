@@ -6,13 +6,16 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import type { StatePayload, View } from "@/lib/api";
 import type { Policy } from "@/lib/policy/schema";
-import type { Act } from "@/lib/tour/types";
+import { buildSharePayload, sharePath } from "@/lib/tour/share";
+import type { Act, CompareResult } from "@/lib/tour/types";
 import ActSearch from "./ActSearch";
 import AgentDrawer, { type ChatMessage } from "./AgentDrawer";
 import CityGrid from "./CityGrid";
+import ComparePanel from "./ComparePanel";
 import ItineraryPanel from "./ItineraryPanel";
 import PartnerCards from "./PartnerCards";
 import PolicyPanel from "./PolicyPanel";
+import QlooCallsPanel from "./QlooCallsPanel";
 
 const TourMap = dynamic(() => import("./TourMap"), { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-xs text-muted">loading map...</div> });
 
@@ -38,7 +41,10 @@ function saveSnapshot(snapshot: unknown) {
   }
 }
 
-const SUGGESTIONS = ["Plan a 8-city North American tour for Nova Reyes", "Route Max Ortega through 6 cities starting in Chicago in March 2027", "Why is the first stop first?", "Skip Las Vegas"];
+/** Real acts in live mode (the first brief asks for more cities than the default policy allows, so the approval card shows up at once). */
+export const LIVE_SUGGESTIONS = ["Plan an 8-city North American tour for Khruangbin starting in Austin in March 2027", 'Route "John Mulaney" through 5 cities in March 2027', "Plan a 6-city tour for Bad Bunny", "Why Denver?", "Skip Las Vegas", "Compare with population-only routing"];
+/** Fictional acts in fixture mode; every name here is invented. */
+export const FIXTURE_SUGGESTIONS = ["Plan an 8-city North American tour for Nova Reyes", "Route Max Ortega through 6 cities starting in Chicago in March 2027", "Why is the first stop first?", "Skip Las Vegas", "Compare with population-only routing"];
 
 /**
  * The studio owns the demo state: the server is stateless between requests (serverless-safe), so the browser
@@ -50,6 +56,8 @@ export default function TourStudio() {
   const [showPolicy, setShowPolicy] = useState(false);
   const [pending, setPending] = useState<string | undefined>();
   const [showAudit, setShowAudit] = useState(false);
+  const [dismissedError, setDismissedError] = useState<string | undefined>();
+  const [shared, setShared] = useState<string | undefined>();
 
   const apply = useCallback((payload: StatePayload) => {
     latestSnapshot = payload.snapshot;
@@ -107,7 +115,22 @@ export default function TourStudio() {
     const cities = view?.plan.itinerary?.stops.map((s) => s.city) ?? [];
     if (cities.length) void call("/api/plan", { op: "rebuild", cities });
   }, [call, view]);
+  const onCompare = useCallback((against: CompareResult["against"]) => void call("/api/plan", { op: "compare", against }), [call]);
   const savePolicy = useCallback((policy: Policy) => call("/api/policy", { policy }), [call]);
+
+  const share = useCallback(async () => {
+    if (!view?.plan.itinerary) return;
+    const path = sharePath(buildSharePayload(view.plan, view.policy, view.audit));
+    const url = `${window.location.origin}${path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShared("Link copied");
+    } catch {
+      setShared(url);
+    }
+    window.open(path, "_blank", "noopener");
+    setTimeout(() => setShared(undefined), 2500);
+  }, [view]);
 
   const reset = () => {
     latestSnapshot = undefined;
@@ -126,13 +149,14 @@ export default function TourStudio() {
 
   const { plan, policy } = view;
   const partnersFor = Object.keys(plan.partners);
+  const qlooError = plan.lastError && plan.lastError.ts !== dismissedError ? plan.lastError : undefined;
 
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-border bg-panel px-4 py-2">
         <div>
           <div className="text-lg font-bold tracking-tight">Tour Router</div>
-          <div className="text-[11px] text-muted">Route a tour by taste. Qloo says where the fans are; the agent does the rest, inside your policy.</div>
+          <div className="text-[11px] text-muted">Where should this act play next, and who should open? Qloo says where the fans are; the agent routes it, inside your policy.</div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <span className={`chip ${view.mode === "live" ? "border-green-400 text-ok" : "border-amber-400 text-warn"}`} title={view.mode === "live" ? "Live Qloo hackathon API" : "No QLOO_API_KEY: synthetic fixtures, deterministic, not Qloo data"}>
@@ -153,6 +177,20 @@ export default function TourStudio() {
         </div>
       </header>
 
+      {view.mode === "fixture" && (
+        <div className="border-b border-amber-300 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" data-banner="fixture">
+          <b>Synthetic fixtures.</b> No QLOO_API_KEY is set, so every act, city score, venue, brand and opener on this page is generated from a hash (names end in &quot;(synthetic)&quot;). Nothing here is Qloo data. Set the key to run the same code against Qloo.
+        </div>
+      )}
+      {qlooError && (
+        <div className="flex items-center gap-3 border-b border-red-300 bg-red-50 px-4 py-1.5 text-xs text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200" data-banner="qloo-error">
+          <b>Qloo unavailable{qlooError.status ? ` (HTTP ${qlooError.status})` : ""}.</b> {qlooError.message} - nothing was substituted; the step that needed it ({qlooError.tool}) failed and is in the audit log. Retry in a moment.
+          <button className="ml-auto underline" onClick={() => setDismissedError(qlooError.ts)}>
+            dismiss
+          </button>
+        </div>
+      )}
+
       <div className="grid flex-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <main className="flex min-w-0 flex-col gap-3">
           <ActSearch act={plan.act} mode={view.mode} onPick={pickAct} onPlan={(p) => setPending(p)} />
@@ -160,16 +198,18 @@ export default function TourStudio() {
           <div className="card h-[380px]">
             <div className="mb-2 flex items-center gap-2">
               <div className="text-sm font-semibold">4. Map</div>
-              <span className="text-xs text-muted">blue = candidate (size = affinity), amber = routed, grey = excluded. OpenStreetMap tiles.</span>
+              <span className="text-xs text-muted">blue = candidate (size = affinity index), amber = routed, grey = excluded. OpenStreetMap tiles.</span>
             </div>
             <div className="h-[330px]">
               <TourMap candidates={plan.candidates} itinerary={plan.itinerary} />
             </div>
           </div>
           <PartnerCards partners={plan.partners} itinerary={plan.itinerary} />
-          <ItineraryPanel itinerary={plan.itinerary} onReroute={onReroute} />
+          <ItineraryPanel itinerary={plan.itinerary} onReroute={onReroute} onShare={share} shared={shared} />
+          <ComparePanel itinerary={plan.itinerary} compare={plan.compare} busy={busy} onCompare={onCompare} />
+          <QlooCallsPanel calls={plan.calls ?? []} mode={view.mode} />
           {showAudit && (
-            <div className="card">
+            <div className="card" data-panel="audit">
               <div className="text-sm font-semibold">Audit</div>
               <ul className="mt-2 max-h-80 divide-y divide-border overflow-y-auto text-xs">
                 {view.audit.map((a) => (
@@ -189,7 +229,7 @@ export default function TourStudio() {
           )}
         </main>
         <aside className="card h-[calc(100vh-80px)] min-h-[520px] p-0 lg:sticky lg:top-3">
-          <AgentDrawer chat={chat} llm={view.llm} suggestions={SUGGESTIONS} pending={pending} />
+          <AgentDrawer chat={chat} llm={view.llm} suggestions={view.mode === "live" ? LIVE_SUGGESTIONS : FIXTURE_SUGGESTIONS} pending={pending} />
         </aside>
       </div>
 

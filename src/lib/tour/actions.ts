@@ -132,11 +132,11 @@ export async function rankCities(act: Act, policy: Policy, opts: RankOptions = {
       }
     }),
   );
-  type Scored = { city: string; country: string; region: Region; lat: number; lon: number; metroM: number; cells: number; topCells: HeatmapCell[]; score: number; popularity: number; noSignal?: boolean; note?: string };
+  type Scored = { city: string; country: string; region: Region; lat: number; lon: number; cells: number; topCells: HeatmapCell[]; score: number; popularity: number; noSignal?: boolean; note?: string };
   const scored: Scored[] = pool.map((city) => {
     const m = maps.get(city.country)!;
     const near = cellsNear(city, m.cells);
-    const base = { city: city.name, country: city.country, region: city.region, lat: city.lat, lon: city.lon, metroM: city.metroM, cells: near.length, topCells: near.slice(0, TOP_CELLS) };
+    const base = { city: city.name, country: city.country, region: city.region, lat: city.lat, lon: city.lon, cells: near.length, topCells: near.slice(0, TOP_CELLS) };
     if (m.error) return { ...base, score: 0, popularity: 0, noSignal: true, note: m.error };
     if (near.length === 0) return { ...base, score: 0, popularity: 0, noSignal: true, note: "no Qloo signal within 60 km" };
     const top = near.slice(0, TOP_CELLS);
@@ -144,11 +144,11 @@ export async function rankCities(act: Act, policy: Policy, opts: RankOptions = {
     return { ...base, score: aggregateHeatmap(near), popularity, note: countries.length > 1 ? `normalised within ${COUNTRY_QUERY[city.country] ?? city.country}` : undefined };
   });
   const popRanks = ranksBy(scored, (r) => (r.noSignal ? -1 : r.popularity));
-  const sizeRanks = ranksBy(scored, (r) => r.metroM);
+  const sizeRanks = ranksBy(pool, (c) => c.metroM); // same order as `scored`
   const withRanks = indexScores(scored).map((r, i) => ({ ...r, popularityRank: popRanks[i], populationRank: sizeRanks[i] }));
   const ranked: RankedCity[] = withRanks
     .sort((a, b) => Number(!!a.noSignal) - Number(!!b.noSignal) || b.score - a.score || a.city.localeCompare(b.city))
-    .map(({ metroM: _m, ...c }, i) => ({ ...c, rank: i + 1, lift: c.populationRank - (i + 1), excluded: isExcluded(policy, c.city) || undefined, excludedReason: isExcluded(policy, c.city) ? "policy.excludeCities" : undefined }));
+    .map((c, i) => ({ ...c, rank: i + 1, lift: c.populationRank - (i + 1), excluded: isExcluded(policy, c.city) || undefined, excludedReason: isExcluded(policy, c.city) ? "policy.excludeCities" : undefined }));
   return opts.limit ? ranked.slice(0, opts.limit) : ranked;
 }
 
@@ -191,7 +191,11 @@ export async function pickPartners(act: Act, city: string, policy: Policy, plan:
       ? qloo.insights({ type: "urn:entity:person", signalEntities: signal, signalLocation: loc, take: 30, explainability: true, trends: "high", excludeEntities: [act.entity_id] })
       : qloo.insights({ type: "urn:entity:artist", signalEntities: signal, signalLocation: loc, take: 5, explainability: true, trends: "high", excludeEntities: [act.entity_id] }),
   ]);
-  const v = venues.entities.map((e) => partnerFromEntity(e, labels));
+  // filter.tags is a union over every tag on the place, so galleries or malls with a secondary "live music" tag come back too;
+  // places whose PRIMARY genre is a venue genre go first (stable: Qloo's affinity order inside each group).
+  const venueGenres = new Set(comedian ? COMEDY_VENUE_TAGS : VENUE_TAGS);
+  const isVenue = (p: Partner) => (p.subtype ? venueGenres.has(p.subtype) : false);
+  const v = venues.entities.map((e) => partnerFromEntity(e, labels)).sort((a, b) => Number(isVenue(b)) - Number(isVenue(a)));
   const inWindow = v.filter((x) => x.capacity === undefined || (x.capacity >= policy.venue.minCapacity && x.capacity <= policy.venue.maxCapacity));
   const recommendedVenue = inWindow[0] ?? v[0];
   const b = brands.entities.map((e) => partnerFromEntity(e, labels));

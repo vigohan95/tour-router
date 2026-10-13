@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FIXTURE_ARTISTS, FixtureQloo, cityAffinity, fixtureArtistId, hash } from "@/lib/qloo/fixture";
-import { LiveQloo, heatmapQuery, insightsQuery, parseEntity, parseHeatmapCell } from "@/lib/qloo/live";
+import { LiveQloo, heatmapQuery, insightsQuery, parseEntity, parseHeatmapCell, parseSearchHit } from "@/lib/qloo/live";
 import { getQloo, qlooMode, setQloo } from "@/lib/qloo";
 import { QlooError } from "@/lib/qloo/types";
 import { CITIES, findCity } from "@/lib/tour/cities";
@@ -131,6 +131,8 @@ describe("live client (request shape, parsing, cache, errors)", () => {
     const q = new LiveQloo({ apiKey: "k", fetchImpl: f });
     const hits = await q.search("some act");
     expect(hits).toEqual([expect.objectContaining({ entity_id: "E1", name: "Some Act", popularity: 0.9, hint: "Band from somewhere", tagIds: ["urn:tag:genre:music:rock"] })]);
+    // The live /search tag objects use `tag_id` (verified 2026-10-13), older shapes `id`; names are the last resort.
+    expect(parseSearchHit({ entity_id: "E2", name: "A Comic", types: ["urn:entity:person"], tags: [{ tag_id: "urn:tag:wikipedia_category:wikidata:american_stand_up_comedians", name: "American Stand-up Comedians" }, { name: "Actor" }] }).tagIds).toEqual(["urn:tag:wikipedia_category:wikidata:american_stand_up_comedians", "Actor"]);
     expect(calls[0].url.origin).toBe("https://hackathon.api.qloo.com");
     expect(calls[0].url.searchParams.get("query")).toBe("some act");
     expect(calls[0].url.searchParams.get("types")).toBe("urn:entity:artist");

@@ -15,7 +15,7 @@ function download(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function ItineraryPanel({ itinerary, onReroute }: { itinerary?: Itinerary; onReroute: () => void }) {
+export default function ItineraryPanel({ itinerary, onReroute, onShare, shared }: { itinerary?: Itinerary; onReroute: () => void; onShare?: () => void; shared?: string }) {
   const [copied, setCopied] = useState(false);
   if (!itinerary) {
     return (
@@ -34,6 +34,11 @@ export default function ItineraryPanel({ itinerary, onReroute }: { itinerary?: I
           {itinerary.act.name} - {itinerary.stops.length} stops, {itinerary.startDate} to {itinerary.endDate}, {itinerary.totalKm.toLocaleString("en-US")} km, est. venues {usd(itinerary.estimatedCostUsd)}
         </span>
         <span className="ml-auto flex flex-wrap gap-1">
+          {onShare && (
+            <button className="btn btn-primary" onClick={onShare} title="Read-only page with the whole plan in the link (no account, no agent run needed); printable as a promoter brief">
+              {shared ?? "Share link"}
+            </button>
+          )}
           <button className="btn" onClick={onReroute} title="Re-optimise the order of the current stops">
             Re-route
           </button>
@@ -84,7 +89,7 @@ export default function ItineraryPanel({ itinerary, onReroute }: { itinerary?: I
                 <td className="py-1 pr-2 tabular-nums">{pct(s.score)}</td>
                 <td className="py-1 pr-2">
                   {s.venue?.name ?? "-"}
-                  {s.venue?.capacity ? <span className="text-xs text-muted"> ({s.venue.capacity.toLocaleString("en-US")})</span> : null}
+                  {s.venue?.capacity ? <span className="text-xs text-muted"> ({s.venue.capacity.toLocaleString("en-US")})</span> : s.venue?.detail ? <span className="text-xs text-muted"> ({s.venue.detail})</span> : null}
                 </td>
                 <td className="py-1 pr-2">{s.opener?.name ?? "-"}</td>
                 <td className="py-1 pr-2">{s.brand?.name ?? "-"}</td>

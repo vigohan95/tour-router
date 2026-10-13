@@ -48,6 +48,21 @@ body {
   height: 100%;
 }
 
+/* The shared tour page prints as a promoter brief (browser print = PDF): white paper, no chrome. */
+@media print {
+  :root {
+    --background: #ffffff;
+    --panel: #ffffff;
+    --foreground: #111;
+  }
+  body {
+    background: #fff;
+  }
+  .leaflet-control-container {
+    display: none;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

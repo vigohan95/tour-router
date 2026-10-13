@@ -4,7 +4,10 @@
  *
  * The payload carries names, scores and labels only: no Qloo entity ids, no raw responses, no audit inputs.
  */
-import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from "lz-string";
+// Default import: lz-string ships a UMD build; the named-import interop differs between vitest and the Next server bundle.
+import LZString from "lz-string";
+
+const { compressToEncodedURIComponent, decompressFromEncodedURIComponent } = LZString;
 import type { AuditEntry } from "../store";
 import type { Policy } from "../policy/schema";
 import type { CompareResult, DataModeLike, Partner, Plan, QlooCall } from "./types";
@@ -151,9 +154,18 @@ export function encodeShare(payload: SharePayload): string {
   return compressToEncodedURIComponent(JSON.stringify(payload));
 }
 
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export function decodeShare(encoded: string): SharePayload | undefined {
   try {
-    const json = decompressFromEncodedURIComponent(encoded);
+    // Next hands route params to the page still percent-encoded in places (`$` -> `%24`); the lz alphabet has no `%`, so decoding is safe.
+    const json = decompressFromEncodedURIComponent(safeDecode(encoded));
     if (!json) return undefined;
     const p = JSON.parse(json) as SharePayload;
     if (!p || typeof p !== "object" || p.v !== SHARE_VERSION || !Array.isArray(p.stops) || !p.act?.name) return undefined;

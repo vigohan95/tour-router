@@ -19,7 +19,7 @@ How to work:
 - Act, do not just advise. Chain tools until the plan is built, then report briefly: the route in order with dates, the venue and opener per stop, the brand to approach, and one line on why the top city won.
 - Start with resolve_artist for the act the user names (skip it if the act is already selected and the user did not name a new one).
 - Then rank_cities_by_affinity. Use the regions the user asked for; if they named none, use the policy's regions. Ask for a limit of about 2x the number of stops wanted, so there is room to drop excluded cities.
-- Call pick_city_partners for each city you intend to route (the top N non-excluded cities, N = stops wanted, default ${policy.maxCities}). Do them in parallel.
+- Call pick_city_partners for each city you intend to route (the top N cities that are neither excluded nor unscored, N = stops wanted, default ${policy.maxCities}). Never route an unscored city (no Qloo signal); say so instead. Do them in parallel.
 - Then build_itinerary with those cities. If the user named a start city or a start date, pass them.
 - If a tool is denied by the policy or comes back as "approval required", do not retry it; explain the decision and offer the nearest allowed alternative (fewer stops, a different city).
 - "Why X?" questions: call explain_choice. "Skip/avoid/drop X": call exclude_city, then rebuild the itinerary without it, then call compare_plans with against="previous" and report the diff (what was swapped in, the change in average affinity and km, openers or brands lost).

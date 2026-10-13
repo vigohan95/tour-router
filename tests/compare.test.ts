@@ -21,7 +21,8 @@ const itin = (id: string, stops: Stop[]): Itinerary => ({ id, act, stops, totalK
 
 describe("comparePlans (pure)", () => {
   it("reports swapped cities, affinity / km deltas and partners gained or lost", () => {
-    const taste = itin("taste", [stop(1, "Denver", 0.9, "Juno", "Northline"), stop(2, "Nashville", 0.8, "Cass", "Halo"), stop(3, "Chicago", 0.7, "Rio")]);
+    // The same opener in two cities counts once in the diff.
+    const taste = itin("taste", [stop(1, "Denver", 0.9, "Juno", "Northline"), stop(2, "Nashville", 0.8, "Cass", "Halo"), stop(3, "Chicago", 0.7, "Rio", "Northline")]);
     const pop = itin("pop", [stop(1, "New York", 0.4, "Mabel", "Halo"), stop(2, "Los Angeles", 0.5), stop(3, "Chicago", 0.7, "Rio", undefined, 400)]);
     const r = comparePlans(taste, pop, "population", new Date("2026-10-10T00:00:00Z"));
     expect(r.swappedIn.map((s) => s.city)).toEqual(["Denver", "Nashville"]);
