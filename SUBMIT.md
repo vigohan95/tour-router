@@ -54,7 +54,7 @@ Venue availability and holds, per-market ticket-price suggestions from brand/pri
 - Three share links (music: Khruangbin / comedy: John Mulaney / counterfactual: Bad Bunny) to paste as `https://<tour-router>.vercel.app` + the paths in `docs/share-links.local.md` (git-ignored; regenerate with `npx vitest run --config scripts/vitest.live.config.mts scripts/agent-live.live.ts`). They open the finished plans with no agent run and no LLM quota.
 - GitHub: `https://github.com/vigohan95/tour-router` (make public; MIT visible in About)
 
-**Video**: YouTube, Public, under 3:00 (section B).
+**Video**: https://youtu.be/3nHOC1PNQVA (unlisted, 2:38, uploaded 2026-10-13).
 
 **Image gallery** (1280x720 PNGs in `docs/screenshots/`, captured from the running app in live mode with `scripts/screenshots.py`; Khruangbin, real Qloo data, names and percentages only)
 1. `01-markets-grid-taste-lift.png` - ranked markets with fan affinity, taste lift, size rank, listeners
