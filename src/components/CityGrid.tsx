@@ -88,9 +88,23 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
       { field: "venue", headerName: "Venue", flex: 1, minWidth: 160 },
       { field: "cells", headerName: "Heat cells", width: 100, headerTooltip: "Qloo heatmap cells within 60 km of the city that back the score" },
       { headerName: "Note", width: 200, valueGetter: (p) => p.data?.excludedReason ?? p.data?.note ?? "" },
-      { headerName: "", width: 80, sortable: false, filter: false, cellRenderer: (p: ICellRendererParams<Row>) => (p.data ? <button className="text-xs text-accent underline" onClick={() => onAsk(`Why ${p.data!.city}?`)}>why?</button> : null) },
+      {
+        headerName: "",
+        width: 90,
+        sortable: false,
+        filter: false,
+        cellRenderer: (p: ICellRendererParams<Row>) => {
+          if (!p.data) return null;
+          const not = !!itinerary && p.data.stop === null;
+          return (
+            <button className="text-xs text-accent underline" title={not ? "Answers from the heatmap rank, the obvious (population) route and the policy: excluded, radius clause, cap" : "Answers from the rank, the explainability scores and the route position"} onClick={() => onAsk(not ? `Why not ${p.data!.city}?` : `Why ${p.data!.city}?`)}>
+              {not ? "why not?" : "why?"}
+            </button>
+          );
+        },
+      },
     ],
-    [onAsk, hasJoint, openerName],
+    [onAsk, hasJoint, openerName, itinerary],
   );
 
   const rowClassRules = useMemo<RowClassRules<Row>>(

@@ -8,6 +8,7 @@ import { REGIONS } from "../tour/cities";
 import { buildItinerary, coBillText, excludeCity, explainChoice, pickPartners, pickTourOpener, rankCities, resolveArtist, setAct } from "../tour/actions";
 import { compareText, compareWith } from "../tour/compare";
 import { POLICY_FIELDS, type PolicyChange } from "../tour/policy-compare";
+import { whyNot } from "../tour/why-not";
 import { QlooError } from "../qloo/types";
 import type { Region } from "../tour/cities";
 import { evaluateAction, type Evaluation } from "../policy/engine";
@@ -128,9 +129,23 @@ export function buildTools(): ToolSet {
     }),
 
     explain_choice: tool({
-      description: "Explain why a city is where it is in the plan: its Qloo affinity, index and rank, the chosen venue/brand/opener and the explainability contributions behind them.",
+      description: "Explain why a city is where it is in the plan: its Qloo affinity, index and rank, the chosen venue/brand/opener and the explainability contributions behind them. For a city that is NOT in the itinerary (\"Why not X?\") it also answers from the heatmap rank and lift, whether the obvious (population-only) route would have played it, and the policy: excluded, inside the radius clause of a routed stop, or cut by the city cap.",
       inputSchema: z.object({ city: z.string().min(1) }),
-      execute: guarded("explain_choice", async ({ city }) => explainChoice(getStore().plan, city)),
+      execute: guarded("explain_choice", async ({ city }) => {
+        const store = getStore();
+        let base: ReturnType<typeof explainChoice>;
+        try {
+          base = explainChoice(store.plan, city);
+        } catch (e) {
+          // Not ranked at all: with an itinerary in place the negative form still has an answer (why-not.ts).
+          if (!store.plan.itinerary) throw e;
+          const neg = whyNot(store.plan, store.policy, city);
+          return { city: neg.city, explanation: `Why not routed: ${neg.lines.join(" ")}`, contributions: [], whyNot: { reasons: neg.reasons, rule: neg.rule, lines: neg.lines } };
+        }
+        if (!store.plan.itinerary || store.plan.itinerary.stops.some((s) => s.city === base.city)) return base;
+        const neg = whyNot(store.plan, store.policy, base.city);
+        return { ...base, explanation: `${base.explanation} Why not routed: ${neg.lines.slice(1).join(" ")}`, whyNot: { reasons: neg.reasons, rule: neg.rule, lines: neg.lines } };
+      }),
     }),
 
     pick_tour_opener: tool({

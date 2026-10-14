@@ -44,7 +44,7 @@ function saveSnapshot(snapshot: unknown) {
 }
 
 /** Real acts in live mode (the first brief asks for more cities than the default policy allows, so the approval card shows up at once). */
-export const LIVE_SUGGESTIONS = ["Plan an 8-city North American tour for Khruangbin starting in Austin in March 2027", 'Route "John Mulaney" through 5 cities in March 2027', "Plan a 6-city tour for Bad Bunny", "Why Denver?", "Who should open the whole tour?", "Compare the co-bill route", "Skip Las Vegas", "Compare with population-only routing"];
+export const LIVE_SUGGESTIONS = ["Plan an 8-city North American tour for Khruangbin starting in Austin in March 2027", 'Route "John Mulaney" through 5 cities in March 2027', "Plan a 6-city tour for Bad Bunny", "Why Denver?", "Why not Chicago?", "Who should open the whole tour?", "Compare the co-bill route", "What if the cap were 8?", "Skip Las Vegas", "Compare with population-only routing"];
 /** Fictional acts in fixture mode; every name here is invented. */
 export const FIXTURE_SUGGESTIONS = ["Plan an 8-city North American tour for Nova Reyes", "Route Max Ortega through 6 cities starting in Chicago in March 2027", "Why is the first stop first?", "Who should open the whole tour?", "Skip Las Vegas", "Compare with population-only routing"];
 
