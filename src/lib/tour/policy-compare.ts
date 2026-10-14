@@ -10,15 +10,9 @@ import { makeItinerary } from "./actions";
 import { respectRadius } from "./legs";
 import type { Act, Itinerary, Plan } from "./types";
 
-export type PolicyField = "maxCities" | "excludeCities" | "minKmBetweenStops" | "blackoutDates" | "maxKmPerLeg" | "minGapDays";
+import { FIELD_LABEL, POLICY_FIELDS, type PolicyChange, type PolicyField } from "./policy-fields";
 
-export const POLICY_FIELDS: PolicyField[] = ["maxCities", "excludeCities", "minKmBetweenStops", "blackoutDates", "maxKmPerLeg", "minGapDays"];
-
-export interface PolicyChange {
-  field: PolicyField;
-  /** maxCities / minKmBetweenStops / minGapDays: a number; maxKmPerLeg: a number or null (no cap); excludeCities / blackoutDates: names or dates to ADD. */
-  value: number | string | string[] | null;
-}
+export { FIELD_LABEL, POLICY_FIELDS, type PolicyChange, type PolicyField };
 
 export interface PolicyDecisionDiff {
   action: string;
@@ -94,8 +88,6 @@ export function describeValue(policy: Policy, field: PolicyField): string {
       return policy.blackoutDates.join(", ") || "none";
   }
 }
-
-export const FIELD_LABEL: Record<PolicyField, string> = { maxCities: "city cap", excludeCities: "excluded cities", minKmBetweenStops: "radius clause", blackoutDates: "blackout dates", maxKmPerLeg: "max km per leg", minGapDays: "min days between shows" };
 
 /**
  * The cities the agent would route under policy B from the cached ranking: taste order, minus cities excluded under

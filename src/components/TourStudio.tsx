@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import type { StatePayload, View } from "@/lib/api";
 import type { Policy } from "@/lib/policy/schema";
-import type { PolicyChange } from "@/lib/tour/policy-compare";
+import type { PolicyChange } from "@/lib/tour/policy-fields";
 import { buildSharePayload, sharePath } from "@/lib/tour/share";
 import type { Act, CompareResult } from "@/lib/tour/types";
 import ActSearch from "./ActSearch";
@@ -183,7 +183,7 @@ export default function TourStudio() {
       <header className="flex flex-wrap items-center gap-3 border-b border-border bg-panel px-4 py-2">
         <div>
           <div className="text-lg font-bold tracking-tight">Tour Router</div>
-          <div className="text-[11px] text-muted">Where should this act play next, and who should open? Qloo says where the fans are; the agent routes it, inside your policy.</div>
+          <div className="text-[11px] text-muted">Routes a tour inside the promoter&apos;s own rules, and shows what the taste data changed.</div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <span className={`chip ${view.mode === "live" ? "border-green-400 text-ok" : "border-amber-400 text-warn"}`} title={view.mode === "live" ? "Live Qloo hackathon API" : "No QLOO_API_KEY: synthetic fixtures, deterministic, not Qloo data"}>

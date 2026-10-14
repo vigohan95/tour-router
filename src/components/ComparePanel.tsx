@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { compareText } from "@/lib/tour/compare-text";
-import { FIELD_LABEL, POLICY_FIELDS, type PolicyChange, type PolicyField } from "@/lib/tour/policy-compare";
+import { FIELD_LABEL, POLICY_FIELDS, type PolicyChange, type PolicyField } from "@/lib/tour/policy-fields";
 import type { CompareResult, Itinerary } from "@/lib/tour/types";
 import { pct } from "./grid";
 
@@ -56,8 +56,8 @@ export default function ComparePanel({ itinerary, compare, busy, onCompare, onCo
         <div className="text-sm font-semibold">6. What did taste change? And what would another rule change?</div>
         <span className="text-xs text-muted">Same stop count, same dates, same routing; only the city choice (or the policy) differs.</span>
         <span className="ml-auto flex gap-1">
-          <button className={`btn ${compare?.against === "population" ? "btn-primary" : ""}`} disabled={busy} onClick={() => onCompare("population")} title="Biggest metros first, no Qloo">
-            vs population
+          <button className={`btn ${compare?.against === "population" ? "btn-primary" : ""}`} disabled={busy} onClick={() => onCompare("population")} title="The obvious route: biggest metros first, what a model with no taste data picks (no Qloo)">
+            vs the obvious route
           </button>
           <button className={`btn ${compare?.against === "popularity" ? "btn-primary" : ""}`} disabled={busy} onClick={() => onCompare("popularity")} title="Qloo listener density (volume), not affinity">
             vs listeners
