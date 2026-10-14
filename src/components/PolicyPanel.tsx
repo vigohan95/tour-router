@@ -36,8 +36,9 @@ export default function PolicyPanel({ policy, onSave, onClose }: { policy: Polic
 
   const num = (v: string) => (v.trim() === "" ? 0 : Number(v));
 
+  // z-[1000]: above Leaflet's map panes (z-index 400-700), which otherwise paint over the modal.
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10" onClick={onClose}>
+    <div className="fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-10" onClick={onClose}>
       <div className="w-full max-w-2xl rounded-lg border border-border bg-panel p-4 shadow-xl" onClick={(e) => e.stopPropagation()} data-panel="policy">
         <div className="flex items-center justify-between">
           <div>

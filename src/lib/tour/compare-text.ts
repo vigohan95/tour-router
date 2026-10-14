@@ -2,7 +2,7 @@
 import type { CompareResult } from "./types";
 
 export const BASELINE_LABEL: Record<CompareResult["against"], string> = {
-  population: "population-only routing (biggest metros, no Qloo)",
+  population: "the obvious route (biggest metros, what a model with no taste data picks; population-only routing, no Qloo)",
   popularity: "popularity-only routing (Qloo listener density, not affinity)",
   previous: "the previous itinerary",
   cobill: "the co-bill route (cities ranked on headliner + tour opener joint affinity)",
