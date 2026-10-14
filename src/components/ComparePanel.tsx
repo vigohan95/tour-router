@@ -24,13 +24,16 @@ export default function ComparePanel({ itinerary, compare, busy, onCompare }: { 
           <button className={`btn ${compare?.against === "previous" ? "btn-primary" : ""}`} disabled={busy} onClick={() => onCompare("previous")} title="The itinerary the last rebuild replaced">
             vs previous
           </button>
+          <button className={`btn ${compare?.against === "cobill" ? "btn-primary" : ""}`} disabled={busy} onClick={() => onCompare("cobill")} title="The route a headliner + tour-opener joint heatmap would pick (picks the tour opener first if needed)">
+            vs co-bill route
+          </button>
         </span>
       </div>
       {!compare && <p className="mt-2 text-xs text-muted">Pick a baseline to see which cities Qloo swapped in and out, and what that cost or gained in fan affinity, travel and partners.</p>}
       {compare && (
         <div className="mt-2 grid gap-3 text-sm md:grid-cols-[1fr_1fr_auto]">
           <div className="rounded-md border border-green-300 bg-green-50 p-2 dark:border-green-800 dark:bg-green-950/30">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-ok">Taste route adds</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ok">{compare.against === "cobill" ? "Headliner-only route keeps (co-bill would drop)" : "Taste route adds"}</div>
             <ul className="mt-1 space-y-0.5">
               {compare.swappedIn.length === 0 && <li className="text-xs text-muted">nothing: same cities</li>}
               {compare.swappedIn.map((s) => (
@@ -41,7 +44,7 @@ export default function ComparePanel({ itinerary, compare, busy, onCompare }: { 
             </ul>
           </div>
           <div className="rounded-md border border-red-300 bg-red-50 p-2 dark:border-red-900 dark:bg-red-950/30">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-bad">{compare.against === "previous" ? "Dropped since the previous route" : `${compare.against === "population" ? "Population-only" : "Listener-only"} routing would pick instead`}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-bad">{compare.against === "previous" ? "Dropped since the previous route" : compare.against === "cobill" ? "Co-bill route would pick instead" : `${compare.against === "population" ? "The obvious route (biggest metros)" : "Listener-only routing"} would pick instead`}</div>
             <ul className="mt-1 space-y-0.5">
               {compare.swappedOut.length === 0 && <li className="text-xs text-muted">nothing</li>}
               {compare.swappedOut.map((s) => (
@@ -55,8 +58,8 @@ export default function ComparePanel({ itinerary, compare, busy, onCompare }: { 
             <thead className="text-left text-[10px] uppercase tracking-wide text-muted">
               <tr>
                 <th className="pr-3">metric</th>
-                <th className="pr-3">taste</th>
-                <th className="pr-3">baseline</th>
+                <th className="pr-3">{compare.against === "cobill" ? "headliner route" : "taste"}</th>
+                <th className="pr-3">{compare.against === "cobill" ? "co-bill route" : "baseline"}</th>
                 <th>delta</th>
               </tr>
             </thead>
@@ -67,6 +70,14 @@ export default function ComparePanel({ itinerary, compare, busy, onCompare }: { 
                 <td className="pr-3">{pct(compare.avgAffinity.baseline)}</td>
                 <td className={compare.avgAffinity.delta >= 0 ? "text-ok" : "text-bad"}>{signed(Math.round(compare.avgAffinity.delta * 100), " pts")}</td>
               </tr>
+              {compare.avgJointAffinity && (
+                <tr>
+                  <td className="pr-3">avg co-bill affinity</td>
+                  <td className="pr-3">{pct(compare.avgJointAffinity.plan)}</td>
+                  <td className="pr-3">{pct(compare.avgJointAffinity.baseline)}</td>
+                  <td className={compare.avgJointAffinity.delta >= 0 ? "text-ok" : "text-bad"}>{signed(Math.round(compare.avgJointAffinity.delta * 100), " pts")}</td>
+                </tr>
+              )}
               <tr>
                 <td className="pr-3">travel</td>
                 <td className="pr-3">{compare.totalKm.plan.toLocaleString("en-US")} km</td>

@@ -11,6 +11,7 @@ import type { Act, CompareResult } from "@/lib/tour/types";
 import ActSearch from "./ActSearch";
 import AgentDrawer, { type ChatMessage } from "./AgentDrawer";
 import CityGrid from "./CityGrid";
+import CoBillPanel from "./CoBillPanel";
 import ComparePanel from "./ComparePanel";
 import ItineraryPanel from "./ItineraryPanel";
 import PartnerCards from "./PartnerCards";
@@ -42,9 +43,9 @@ function saveSnapshot(snapshot: unknown) {
 }
 
 /** Real acts in live mode (the first brief asks for more cities than the default policy allows, so the approval card shows up at once). */
-export const LIVE_SUGGESTIONS = ["Plan an 8-city North American tour for Khruangbin starting in Austin in March 2027", 'Route "John Mulaney" through 5 cities in March 2027', "Plan a 6-city tour for Bad Bunny", "Why Denver?", "Skip Las Vegas", "Compare with population-only routing"];
+export const LIVE_SUGGESTIONS = ["Plan an 8-city North American tour for Khruangbin starting in Austin in March 2027", 'Route "John Mulaney" through 5 cities in March 2027', "Plan a 6-city tour for Bad Bunny", "Why Denver?", "Who should open the whole tour?", "Compare the co-bill route", "Skip Las Vegas", "Compare with population-only routing"];
 /** Fictional acts in fixture mode; every name here is invented. */
-export const FIXTURE_SUGGESTIONS = ["Plan an 8-city North American tour for Nova Reyes", "Route Max Ortega through 6 cities starting in Chicago in March 2027", "Why is the first stop first?", "Skip Las Vegas", "Compare with population-only routing"];
+export const FIXTURE_SUGGESTIONS = ["Plan an 8-city North American tour for Nova Reyes", "Route Max Ortega through 6 cities starting in Chicago in March 2027", "Why is the first stop first?", "Who should open the whole tour?", "Skip Las Vegas", "Compare with population-only routing"];
 
 /**
  * The studio owns the demo state: the server is stateless between requests (serverless-safe), so the browser
@@ -116,6 +117,18 @@ export default function TourStudio() {
     if (cities.length) void call("/api/plan", { op: "rebuild", cities });
   }, [call, view]);
   const onCompare = useCallback((against: CompareResult["against"]) => void call("/api/plan", { op: "compare", against }), [call]);
+  const [coBillBusy, setCoBillBusy] = useState(false);
+  const [coBillError, setCoBillError] = useState<string | undefined>();
+  const onCoBill = useCallback(
+    async (openerEntityId?: string) => {
+      setCoBillBusy(true);
+      setCoBillError(undefined);
+      const e = await call("/api/plan", { op: "cobill", openerEntityId });
+      setCoBillBusy(false);
+      if (e) setCoBillError(e);
+    },
+    [call],
+  );
   const savePolicy = useCallback((policy: Policy) => call("/api/policy", { policy }), [call]);
 
   const share = useCallback(async () => {
@@ -194,7 +207,7 @@ export default function TourStudio() {
       <div className="grid flex-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <main className="flex min-w-0 flex-col gap-3">
           <ActSearch act={plan.act} mode={view.mode} onPick={pickAct} onPlan={(p) => setPending(p)} />
-          <CityGrid candidates={plan.candidates} itinerary={plan.itinerary} partnersFor={partnersFor} onExclude={onExclude} onReorder={onReorder} onAsk={ask} />
+          <CityGrid candidates={plan.candidates} itinerary={plan.itinerary} partnersFor={partnersFor} onExclude={onExclude} onReorder={onReorder} onAsk={ask} openerName={plan.coBill?.opener.name} />
           <div className="card h-[380px]">
             <div className="mb-2 flex items-center gap-2">
               <div className="text-sm font-semibold">4. Map</div>
@@ -205,6 +218,7 @@ export default function TourStudio() {
             </div>
           </div>
           <PartnerCards partners={plan.partners} itinerary={plan.itinerary} holds={policy.heldVenues} />
+          <CoBillPanel act={plan.act} coBill={plan.coBill} partnersCount={partnersFor.length} busy={busy || coBillBusy} error={coBillError} onPick={onCoBill} onCompare={() => onCompare("cobill")} />
           <ItineraryPanel itinerary={plan.itinerary} onReroute={onReroute} onShare={share} shared={shared} />
           <ComparePanel itinerary={plan.itinerary} compare={plan.compare} busy={busy} onCompare={onCompare} />
           <QlooCallsPanel calls={plan.calls ?? []} mode={view.mode} />

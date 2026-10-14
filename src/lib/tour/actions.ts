@@ -17,7 +17,7 @@ import { heldFor, isExcluded } from "../policy/schema";
 import { getStore, touch } from "../store";
 import { COUNTRY_QUERY, citiesIn, findCity, qlooLocality, type City, type Region } from "./cities";
 import { haversineKm, pathKm, routeOrder, showDates } from "./route";
-import { partnerFromEntity, type Act, type CityPartners, type Itinerary, type Partner, type Plan, type RankedCity, type Stop } from "./types";
+import { partnerFromEntity, type Act, type CityPartners, type CoBill, type Itinerary, type Partner, type Plan, type RankedCity, type Stop, type TourOpenerCandidate } from "./types";
 
 /** Heatmap cells within this distance of a city centre count for that city (country maps are geohash-4/5, ~20-40 km cells). */
 export const HEATMAP_RADIUS_KM = 60;
@@ -67,6 +67,7 @@ export function setAct(plan: Plan, act: Act) {
     plan.itinerary = undefined;
     plan.previousItinerary = undefined;
     plan.compare = undefined;
+    plan.coBill = undefined;
   }
   plan.act = act;
   touch();
@@ -340,4 +341,123 @@ export function excludeCity(plan: Plan, city: string, excluded: boolean, reason?
 
 export function currentPlan(): Plan {
   return getStore().plan;
+}
+
+/* ---------------- tour opener + co-bill markets ---------------- */
+
+/**
+ * Rank the acts that recur across the routed cities' opener lists (the lists pickPartners already fetched with
+ * signal.location.query per city): by stops appeared in, then mean affinity. No Qloo call.
+ */
+export function tourOpenerCandidates(plan: Plan, cities: string[]): TourOpenerCandidate[] {
+  const seen = new Map<string, { p: Partner; cities: string[]; affinities: number[] }>();
+  for (const city of cities) {
+    for (const o of plan.partners[city]?.openers ?? []) {
+      const e = seen.get(o.entity_id) ?? { p: o, cities: [], affinities: [] };
+      e.cities.push(city);
+      e.affinities.push(o.affinity);
+      seen.set(o.entity_id, e);
+    }
+  }
+  return [...seen.values()]
+    .map((e) => ({ entity_id: e.p.entity_id, name: e.p.name, detail: e.p.detail, stopsAppeared: e.cities.length, ofStops: cities.length, meanAffinity: Number((e.affinities.reduce((a, b) => a + b, 0) / e.affinities.length).toFixed(4)), cities: e.cities }))
+    .sort((a, b) => b.stopsAppeared - a.stopsAppeared || b.meanAffinity - a.meanAffinity || a.name.localeCompare(b.name));
+}
+
+export interface TourOpenerOptions {
+  /** Pick this candidate instead of the best one. */
+  openerEntityId?: string;
+  /** Cities to intersect over; defaults to the itinerary's stops, else every city with partners. */
+  cities?: string[];
+}
+
+/**
+ * Pick one opener for the whole run and re-score the candidate cities on the pairing: one `urn:heatmap` per
+ * country with `signal.interests.entities=<headliner>,<opener>` (the live API accepts two signals; verified
+ * 2026-10-13, see docs/LIVE-NOTES.md). If a country's two-signal request fails, that country falls back to the
+ * mean of two single-signal maps and the result says so (`method: "averaged"`). Stores the result on the plan and
+ * writes `jointScore` / `jointRank` on the candidates.
+ */
+export async function pickTourOpener(act: Act, plan: Plan, policy: Policy, opts: TourOpenerOptions = {}, qloo: QlooAdapter = getQloo(), now = new Date()): Promise<CoBill> {
+  void policy;
+  const cities = opts.cities ?? plan.itinerary?.stops.map((s) => s.city) ?? Object.keys(plan.partners);
+  const withPartners = cities.filter((c) => plan.partners[c]?.openers.length);
+  if (withPartners.length < 2) throw new Error("Pick partners for at least two routed cities first; the tour opener is the act that recurs across their opener lists.");
+  const ranked = tourOpenerCandidates(plan, withPartners);
+  if (ranked.length === 0) throw new Error("No openers were returned for these cities.");
+  const chosen = (opts.openerEntityId ? ranked.find((r) => r.entity_id === opts.openerEntityId) : undefined) ?? ranked[0];
+  const opener = withPartners.flatMap((c) => plan.partners[c].openers).find((o) => o.entity_id === chosen.entity_id)!;
+  const locals: Record<string, string> = {};
+  for (const c of withPartners) {
+    const top = plan.partners[c].openers[0];
+    if (top && top.entity_id !== chosen.entity_id) locals[c] = top.name;
+  }
+  // One joint heatmap per country already in the ranking.
+  const countries = [...new Set(plan.candidates.map((c) => c.country))];
+  const maps = new Map<string, { cells: HeatmapCell[]; averaged?: boolean; error?: string }>();
+  await Promise.all(
+    countries.map(async (code) => {
+      const location = { query: COUNTRY_QUERY[code] ?? code };
+      try {
+        const hm = await qloo.heatmap({ signalEntities: [act.entity_id, opener.entity_id], location });
+        maps.set(code, { cells: hm.cells });
+      } catch (e) {
+        // Honest fallback: average the two single-signal maps cell by cell (by geohash / coordinates), and say so.
+        try {
+          const [a, b] = await Promise.all([qloo.heatmap({ signalEntities: [act.entity_id], location }), qloo.heatmap({ signalEntities: [opener.entity_id], location })]);
+          const key = (h: HeatmapCell) => h.geohash ?? `${h.latitude},${h.longitude}`;
+          const bMap = new Map(b.cells.map((h) => [key(h), h]));
+          const cells = a.cells.map((h) => {
+            const o = bMap.get(key(h));
+            return { ...h, affinity: o ? (h.affinity + o.affinity) / 2 : h.affinity / 2 };
+          });
+          maps.set(code, { cells, averaged: true, error: e instanceof Error ? e.message.slice(0, 80) : String(e) });
+        } catch (e2) {
+          maps.set(code, { cells: [], error: `Qloo error: ${e2 instanceof Error ? e2.message.slice(0, 80) : String(e2)}` });
+        }
+      }
+    }),
+  );
+  const averagedCountries = [...maps.entries()].filter(([, m]) => m.averaged).map(([code]) => COUNTRY_QUERY[code] ?? code);
+  const failed = [...maps.entries()].filter(([, m]) => !m.averaged && m.error).map(([code]) => COUNTRY_QUERY[code] ?? code);
+  const scoredCities = plan.candidates.map((c) => {
+    const m = maps.get(c.country);
+    const near = m ? cellsNear(c, m.cells) : [];
+    const joint = c.noSignal || !m || m.cells.length === 0 || near.length === 0 ? undefined : aggregateHeatmap(near);
+    return { c, joint };
+  });
+  const jointRanks = ranksBy(scoredCities, (r) => (r.joint === undefined ? -1 : r.joint));
+  const rows: CoBill["cities"] = [];
+  scoredCities.forEach(({ c, joint }, i) => {
+    c.jointScore = joint;
+    c.jointRank = joint === undefined ? undefined : jointRanks[i];
+    if (joint !== undefined) rows.push({ city: c.city, headliner: c.score, joint, delta: Number((joint - c.score).toFixed(4)), headlinerRank: c.rank, jointRank: jointRanks[i] });
+  });
+  rows.sort((a, b) => b.joint - a.joint);
+  const method: CoBill["method"] = averagedCountries.length ? "averaged" : "joint";
+  const methodNote =
+    method === "joint"
+      ? `One heatmap per country (${countries.map((c) => COUNTRY_QUERY[c] ?? c).join(", ")}) signalled by ${act.name} and ${opener.name} together (signal.interests.entities with two ids), binned to each city like the headliner map.${failed.length ? ` No joint map for ${failed.join(", ")} (Qloo error); those cities have no co-bill score.` : ""}`
+      : `Qloo refused a two-signal heatmap for ${averagedCountries.join(", ")}; those countries show the mean of two single-signal maps (headliner, opener) cell by cell, which is an approximation of the joint signal, not Qloo's own co-bill affinity.`;
+  const result: CoBill = { opener: { ...opener }, stopsAppeared: chosen.stopsAppeared, ofStops: chosen.ofStops, meanAffinity: chosen.meanAffinity, alternates: ranked.filter((r) => r.entity_id !== chosen.entity_id).slice(0, 5), locals, method, methodNote, cities: rows, computedAt: now.toISOString(), mode: qloo.mode };
+  plan.coBill = result;
+  touch();
+  return result;
+}
+
+const pct1 = (n: number) => `${(n * 100).toFixed(1)}%`;
+
+/** One paragraph for the agent and the panel. */
+export function coBillText(act: Act, cb: CoBill): string {
+  const top = cb.cities.slice(0, 5);
+  const up = cb.cities.filter((r) => r.jointRank < r.headlinerRank).sort((a, b) => b.headlinerRank - b.jointRank - (a.headlinerRank - a.jointRank)).slice(0, 3);
+  const down = cb.cities.filter((r) => r.jointRank > r.headlinerRank).sort((a, b) => b.jointRank - b.headlinerRank - (a.jointRank - a.headlinerRank)).slice(0, 3);
+  const parts = [`Tour opener: ${cb.opener.name}${cb.opener.detail ? ` (${cb.opener.detail})` : ""}, in the top openers of ${cb.stopsAppeared} of ${cb.ofStops} routed cities, mean affinity ${pct(cb.meanAffinity)}.`];
+  if (cb.alternates.length) parts.push(`Runners-up: ${cb.alternates.slice(0, 3).map((a) => `${a.name} (${a.stopsAppeared}/${a.ofStops}, ${pct(a.meanAffinity)})`).join(", ")}.`);
+  const localList = Object.entries(cb.locals);
+  if (localList.length) parts.push(`Local alternates where the city's own #1 differs: ${localList.map(([c, n]) => `${c}: ${n}`).join("; ")}.`);
+  if (top.length) parts.push(`Co-bill markets (${act.name} + ${cb.opener.name}, ${cb.method === "joint" ? "one joint heatmap per country" : "averaged single-signal maps"}): ${top.map((r) => `${r.city} ${pct1(r.joint)} (headliner-only ${pct1(r.headliner)}, #${r.headlinerRank} -> #${r.jointRank})`).join(", ")}.`);
+  if (up.length) parts.push(`The pairing lifts ${up.map((r) => `${r.city} (#${r.headlinerRank} -> #${r.jointRank})`).join(", ")}.`);
+  if (down.length) parts.push(`It costs ${down.map((r) => `${r.city} (#${r.headlinerRank} -> #${r.jointRank})`).join(", ")}.`);
+  return parts.join(" ");
 }

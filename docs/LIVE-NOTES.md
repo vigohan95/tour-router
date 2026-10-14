@@ -54,6 +54,56 @@ Limits of B, stated in the UI and the share page: affinity is normalised within 
 
 Counterfactual (same 6 stops, same dates): population-only routing picks New York, Chicago, Dallas, Houston, Mexico City (+ Austin as the named start); taste swaps in Denver, San Francisco, Portland, Vancouver: average affinity 98.8% vs 93.9% (+5 pts), 4,417 km vs 6,502 km (-2,085 km). Bad Bunny: taste swaps in Montreal, Orlando, Monterrey for Los Angeles, Mexico City, Houston (+0.4 pts, -2,671 km).
 
+## Co-bill markets: one heatmap signalled by headliner + tour opener (live, 2026-10-13)
+
+Question: can a heatmap be signalled by two acts at once, so that cities are ranked on a *pairing* (headliner + support act) rather than on the headliner alone? Measured with the product's own pipeline (`scripts/probe-cobill.live.ts`): rank -> partners for the 6 routed stops -> tour opener = the act that recurs across the six per-city opener lists (ranked by stops appeared in, then mean affinity) -> `filter.type=urn:heatmap&signal.interests.entities=<headliner>,<opener>&filter.location.query=<country>` for United States, Canada, Mexico -> the same 60 km / top-5-cell binning as the headliner map.
+
+Findings:
+- The API **accepts two signal entities on a heatmap**: HTTP 200, 4,979 US cells for Khruangbin + SAULT (4,950 for Khruangbin alone, 3,529 for the opener alone). The joint map is not the headliner map and not the mean of the two single maps (e.g. US: Portland #4 headliner-only, #1 opener-only, #2 on the joint map; Houston #12 / #23 / #21). So the product uses the joint map directly; the cell-by-cell average of two single-signal maps exists only as a labelled fallback for a country whose two-signal request fails (`method: "averaged"`, shown in the UI), and was not needed live.
+- Opener affinities with `signal.location.query=<city>` + `bias.trends=high` are **flat** (82-83% for every candidate in every city), so the tour-opener choice is carried by *how many stops* an act recurs in, and ties are broken by mean affinity at the second decimal (Khruangbin: SAULT 82.6% vs Kikagaku Moyo 82.5%, both 6/6). The UI shows the runners-up and lets the promoter pick one with one click; the per-city #1 stays listed as the local alternate.
+- For the comedian, Qloo's `urn:entity:person` openers are well-known comics / comic actors (Colin Jost, Nick Kroll, Adam Scott, Aubrey Plaza), i.e. acts with the strongest *audience overlap*, not acts a promoter could book as support. The card says "opener" for the music path and "comic with the highest cross-affinity" for the comedy path; it is a pairing signal, not an availability claim.
+- Cost: 3 extra Qloo requests per tour opener (one joint heatmap per country), on top of the 22 of a 6-city plan.
+
+### Khruangbin + SAULT (tour opener, in the top openers of 6/6 routed stops; locals: Kikagaku Moyo in Portland, Denver, Austin)
+
+| # | City | Headliner-only | Co-bill (joint) | Delta | Rank change |
+|---|---|---|---|---|---|
+| 1 | San Francisco * | 99.7% | 99.8% | +0.0 pts | #1 -> #1 |
+| 2 | Denver * | 99.0% | 97.3% | -1.6 pts | #2 -> #8 |
+| 3 | Los Angeles * | 98.8% | 99.7% | +0.9 pts | #3 -> #2 |
+| 4 | Portland * | 98.7% | 98.7% | +0.0 pts | #4 -> #5 |
+| 5 | Vancouver * | 98.6% | 98.6% | -0.0 pts | #5 -> #6 |
+| 6 | Austin * | 98.3% | 96.5% | -1.8 pts | #6 -> #9 |
+| 7 | Seattle | 97.6% | 99.4% | +1.8 pts | #7 -> #3 |
+| 8 | New York | 96.2% | 99.2% | +3.0 pts | #8 -> #4 |
+| 9 | San Diego | 96.1% | 95.1% | -1.0 pts | #9 -> #13 |
+| 10 | Mexico City | 95.9% | 95.4% | -0.5 pts | #10 -> #12 |
+| 11 | Toronto | 95.7% | 97.4% | +1.7 pts | #11 -> #7 |
+| 13 | Chicago | 93.1% | 96.2% | +3.0 pts | #13 -> #10 |
+| 14 | Washington | 90.9% | 95.9% | +5.0 pts | #14 -> #11 |
+
+`*` = routed on the headliner-only route (top 6 under the default 160 km radius clause, start San Francisco). **Co-bill route vs headliner-only route** (same 6 stops, same start, same dates): the co-bill route adds Seattle and New York and drops Denver and Austin; headliner affinity 98.8% vs 98.3%, joint affinity 98.4% vs 99.2% (+0.8 pts for the pairing), 5,329 km vs 6,222 km (New York is the price). Order: San Francisco -> Los Angeles -> Portland -> Seattle -> Vancouver -> New York.
+
+### John Mulaney (person) + Colin Jost (6/6 stops; the same act is #1 in every routed city)
+
+| # | City | Headliner-only | Co-bill (joint) | Delta | Rank change |
+|---|---|---|---|---|---|
+| 1 | Boston * | 98.9% | 99.6% | +0.7 pts | #1 -> #1 |
+| 2 | Portland * | 98.5% | 98.4% | -0.2 pts | #2 -> #6 |
+| 3 | Vancouver * | 98.2% | 98.6% | +0.4 pts | #3 -> #5 |
+| 4 | Chicago * | 98.1% | 98.7% | +0.6 pts | #4 -> #3 |
+| 5 | Denver * | 97.7% | 99.2% | +1.5 pts | #5 -> #2 |
+| 6 | Toronto * | 97.4% | 97.9% | +0.6 pts | #6 -> #8 |
+| 7 | Seattle | 97.0% | 98.6% | +1.6 pts | #7 -> #4 |
+| 8 | New York | 96.4% | 98.0% | +1.7 pts | #8 -> #7 |
+| 10 | Washington | 94.3% | 96.6% | +2.4 pts | #10 -> #9 |
+| 11 | Minneapolis | 93.8% | 96.4% | +2.6 pts | #11 -> #10 |
+| 13 | Austin | 91.8% | 96.2% | +4.3 pts | #13 -> #12 |
+
+Co-bill route vs headliner-only route: adds Seattle, drops Toronto; headliner affinity 98.1% vs 98.1%, joint 98.7% vs 98.8%, 4,868 km vs 4,852 km. For a comedian whose "opener" is the same act everywhere, the pairing barely moves the cities; it is the music case, where the local openers differ by region, that changes the route.
+
+Limits: the joint affinity is normalised within each country like the headliner map (cross-country order indicative only); a 1-3 pt move at the top of a 90-100% range is a rank change, not a crowd-size claim; nothing here says the opener is available or affordable.
+
 ## Request -> result (redacted example)
 
 1. `GET /search?query=Khruangbin&types=urn:entity:artist,urn:entity:person&take=10` -> first artist hit `BAF6317A...` ("Khruangbin", popularity 0.99).

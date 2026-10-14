@@ -12,16 +12,18 @@ import { respectRadius } from "./legs";
 import type { Act, CompareResult, Itinerary, Plan, RankedCity, Stop } from "./types";
 import { BASELINE_LABEL } from "./compare-text";
 
-export type BaselineMode = "population" | "popularity";
+export type BaselineMode = "population" | "popularity" | "cobill";
 
 /**
  * The `n` non-excluded candidates a promoter would pick with no taste data: by metro size, or by raw listener
  * density. A start city the promoter named is kept in both routes, so the diff only shows what taste changed.
  */
 export function baselineCities(candidates: RankedCity[], n: number, mode: BaselineMode, keep?: string, minKm = 0): string[] {
-  const pool = candidates.filter((c) => !c.excluded);
+  // Co-bill: only cities with a joint score can be ranked on it (unscored cities are never routed on a guess).
+  const pool = candidates.filter((c) => !c.excluded && (mode !== "cobill" || c.jointScore !== undefined));
   const metro = new Map(CITIES.map((c) => [c.name, c.metroM]));
-  const sorted = [...pool].sort((a, b) => (mode === "population" ? (metro.get(b.city) ?? 0) - (metro.get(a.city) ?? 0) : b.popularity - a.popularity) || a.city.localeCompare(b.city));
+  const value = (c: RankedCity) => (mode === "population" ? (metro.get(c.city) ?? 0) : mode === "popularity" ? c.popularity : (c.jointScore ?? 0));
+  const sorted = [...pool].sort((a, b) => value(b) - value(a) || a.city.localeCompare(b.city));
   const kept = keep && pool.some((c) => c.city === keep) ? [keep] : [];
   const ordered = [...kept, ...sorted.map((c) => c.city).filter((c) => !kept.includes(c))];
   // The baseline obeys the same radius clause as the taste route: same rules, different data.
@@ -33,12 +35,16 @@ const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.le
 const names = (stops: Stop[], pick: (s: Stop) => string | undefined) => [...new Set(stops.map(pick).filter((x): x is string => !!x))];
 const diff = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
 
-/** Stop-by-stop diff of the taste plan against a baseline itinerary. */
-export function comparePlans(plan: Itinerary, baseline: Itinerary, against: CompareResult["against"], now = new Date()): CompareResult {
+/** Stop-by-stop diff of the taste plan against a baseline itinerary. `joint` = per-city co-bill affinity when a tour opener is picked. */
+export function comparePlans(plan: Itinerary, baseline: Itinerary, against: CompareResult["against"], now = new Date(), joint?: Map<string, number>): CompareResult {
   const inPlan = new Set(plan.stops.map((s) => s.city));
   const inBase = new Set(baseline.stops.map((s) => s.city));
   const planAff = avg(plan.stops.map((s) => s.score));
   const baseAff = avg(baseline.stops.map((s) => s.score));
+  const jointOf = (stops: Stop[]) => stops.map((s) => joint?.get(s.city)).filter((x): x is number => x !== undefined);
+  const jp = joint ? jointOf(plan.stops) : [];
+  const jb = joint ? jointOf(baseline.stops) : [];
+  const avgJointAffinity = joint && jp.length && jb.length ? { plan: round(avg(jp)), baseline: round(avg(jb)), delta: round(avg(jp) - avg(jb)) } : undefined;
   const openersPlan = names(plan.stops, (s) => s.opener?.name);
   const openersBase = names(baseline.stops, (s) => s.opener?.name);
   const brandsPlan = names(plan.stops, (s) => s.brand?.name);
@@ -49,6 +55,7 @@ export function comparePlans(plan: Itinerary, baseline: Itinerary, against: Comp
     swappedIn: plan.stops.filter((s) => !inBase.has(s.city)),
     swappedOut: baseline.stops.filter((s) => !inPlan.has(s.city)),
     avgAffinity: { plan: round(planAff), baseline: round(baseAff), delta: round(planAff - baseAff) },
+    avgJointAffinity,
     totalKm: { plan: plan.totalKm, baseline: baseline.totalKm, delta: plan.totalKm - baseline.totalKm },
     estimatedCostUsd: { plan: plan.estimatedCostUsd, baseline: baseline.estimatedCostUsd, delta: plan.estimatedCostUsd - baseline.estimatedCostUsd },
     openers: { gained: diff(openersPlan, openersBase), lost: diff(openersBase, openersPlan) },
@@ -71,6 +78,7 @@ export function compareWith(act: Act, plan: Plan, policy: Policy, against: Compa
     if (!plan.previousItinerary) throw new Error("There is no previous itinerary to compare with.");
     baseline = plan.previousItinerary;
   } else {
+    if (against === "cobill" && !plan.coBill) throw new Error("Pick a tour opener first (pick_tour_opener); the co-bill route ranks cities on the headliner + opener joint heatmap.");
     const startCity = opts.startCity ?? current.startCity;
     const cities = baselineCities(plan.candidates, current.stops.length, against, startCity, policy.minKmBetweenStops);
     if (cities.length === 0) throw new Error("No candidates to build a baseline from; rank cities first.");
@@ -78,7 +86,8 @@ export function compareWith(act: Act, plan: Plan, policy: Policy, against: Compa
     baseline = makeItinerary(act, plan, policy, { cities, startCity, startDate: opts.startDate ?? current.startDate, gapDays: opts.gapDays ?? current.gapDays }, plan.mode, now);
     baseline.id = `baseline_${against}_${current.id}`;
   }
-  const result = comparePlans(current, baseline, against, now);
+  const joint = plan.coBill ? new Map(plan.candidates.filter((c) => c.jointScore !== undefined).map((c) => [c.city, c.jointScore!])) : undefined;
+  const result = comparePlans(current, baseline, against, now, joint);
   plan.compare = result;
   return result;
 }

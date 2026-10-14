@@ -139,11 +139,12 @@ export function parseStartDate(text: string, now = new Date()): string | undefin
   return undefined;
 }
 
-export type Intent = "plan" | "explain" | "exclude" | "compare" | "status" | "help";
+export type Intent = "plan" | "explain" | "exclude" | "compare" | "opener" | "status" | "help";
 
 export function detectIntent(text: string): Intent {
   const t = text.toLowerCase();
   if (/\b(compare|counterfactual|what if|without qloo|ignored? taste|population[- ]only|by population|popularity[- ]only|what did qloo change|baseline)\b/.test(t)) return "compare";
+  if (/\b(tour[- ]opener|co-?bill|package tour|support act|who should open|open the (whole |entire )?(tour|run)|opener for the (whole |entire )?(tour|run))\b/.test(t)) return "opener";
   if (/\b(why|explain|reason|how come)\b/.test(t)) return "explain";
   if (/\b(skip|avoid|drop|exclude|remove|not|without|no)\b/.test(t) && parseCities(text).length > 0) return "exclude";
   if (/\b(plan|route|book|tour|itinerary|cities|stops|where should|run)\b/.test(t) || parseAct(text)) return "plan";
@@ -253,9 +254,16 @@ function planPlaybook(turn: Turn): Action {
   return { type: "text", text: `${summaryText(turn, build)}\n${co ? `(Comparison with population-only routing not available: ${co}.)` : `Versus population-only routing: ${s(cmp.output.summary)}`}` };
 }
 
+function openerPlaybook(turn: Turn): Action {
+  const r = first(turn, "pick_tour_opener");
+  if (!r) return { type: "calls", calls: [{ toolName: "pick_tour_opener", input: {} }] };
+  const o = outcome(r);
+  return { type: "text", text: o ? `I could not pick a tour opener: ${o}.` : s(r.output.summary) };
+}
+
 function comparePlaybook(turn: Turn): Action {
   const t = turn.userText.toLowerCase();
-  const against = /previous|last|before/.test(t) ? "previous" : /popularity|listener|density/.test(t) ? "popularity" : "population";
+  const against = /previous|last|before/.test(t) ? "previous" : /co-?bill|joint|tour[- ]opener|package/.test(t) ? "cobill" : /popularity|listener|density/.test(t) ? "popularity" : "population";
   const r = first(turn, "compare_plans");
   if (!r) return { type: "calls", calls: [{ toolName: "compare_plans", input: { against } }] };
   const o = outcome(r);
@@ -308,7 +316,8 @@ function statusText(turn: Turn): string {
 const HELP = `I route tours with Qloo's taste data. Try:
 - "Plan a 10-city North American tour for Nova Reyes"
 - "Route Max Ortega through 8 cities in the UK starting in London in March 2027"
-- "Why Denver?" / "Skip Phoenix and Las Vegas"`;
+- "Why Denver?" / "Skip Phoenix and Las Vegas"
+- "Who should open the whole tour?" / "Compare the co-bill route"`;
 
 export function plan(turn: Turn): Action {
   switch (detectIntent(turn.userText)) {
@@ -320,6 +329,8 @@ export function plan(turn: Turn): Action {
       return excludePlaybook(turn);
     case "compare":
       return comparePlaybook(turn);
+    case "opener":
+      return openerPlaybook(turn);
     case "status":
       return { type: "text", text: statusText(turn) };
     default:

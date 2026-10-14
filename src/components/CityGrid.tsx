@@ -39,9 +39,10 @@ function LiftCell(p: ICellRendererParams<Row, number>) {
   );
 }
 
-export default function CityGrid({ candidates, itinerary, partnersFor, onExclude, onReorder, onAsk }: { candidates: RankedCity[]; itinerary?: Itinerary; partnersFor: string[]; onExclude: (city: string, excluded: boolean) => void; onReorder: (cities: string[]) => void; onAsk: (prompt: string) => void }) {
+export default function CityGrid({ candidates, itinerary, partnersFor, onExclude, onReorder, onAsk, openerName }: { candidates: RankedCity[]; itinerary?: Itinerary; partnersFor: string[]; onExclude: (city: string, excluded: boolean) => void; onReorder: (cities: string[]) => void; onAsk: (prompt: string) => void; openerName?: string }) {
   const theme = useGridTheme();
   const [quick, setQuick] = useState("");
+  const hasJoint = candidates.some((c) => c.jointScore !== undefined);
 
   const rows = useMemo<Row[]>(() => {
     const stopOf = new Map(itinerary?.stops.map((s) => [s.city, s.order]) ?? []);
@@ -80,6 +81,8 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
       { field: "score", headerName: "Fan affinity", width: 170, cellRenderer: ScoreBar, headerTooltip: "Qloo heatmap affinity of the act's fans around this city (one country-wide heatmap, cells within 60 km); bar = index across the candidates" },
       { field: "lift", headerName: "Taste lift", width: 100, cellRenderer: LiftCell, headerTooltip: "Population rank minus taste rank: +N = this city matters more for the act than its size suggests; -N = a big metro whose population cares less" },
       { field: "populationRank", headerName: "Size #", width: 80, headerTooltip: "Rank by metro population (public figures, not Qloo)" },
+      { field: "jointScore", headerName: "Co-bill", width: 100, hide: !hasJoint, valueFormatter: (p) => (p.value === undefined || p.value === null ? "" : pct1(p.value)), headerTooltip: `Affinity on a heatmap signalled by the headliner and the tour opener together${openerName ? ` (${openerName})` : ""}; same binning as Fan affinity` },
+      { headerName: "Co-bill #", width: 90, hide: !hasJoint, valueGetter: (p) => p.data?.jointRank ?? null, cellRenderer: (p: ICellRendererParams<Row, number | null>) => (p.value === null || p.value === undefined || !p.data ? null : <span className={`tabular-nums ${p.value < p.data.rank ? "text-ok" : p.value > p.data.rank ? "text-bad" : "text-muted"}`} title={`#${p.data.rank} headliner-only -> #${p.value} on the pairing`}>#{p.value}{p.value !== p.data.rank ? ` (${p.value < p.data.rank ? "+" : ""}${p.data.rank - p.value})` : ""}</span>), headerTooltip: "Rank on the joint (co-bill) heatmap vs the headliner-only rank" },
       { field: "popularity", headerName: "Listeners", width: 100, valueFormatter: (p) => (p.data?.noSignal ? "" : pct(p.value)), headerTooltip: "Qloo heatmap popularity of the same cells: how dense the act's listeners are here (volume, not over-index)" },
       { field: "popularityRank", headerName: "Listeners #", width: 100, headerTooltip: "Rank by listener density" },
       { field: "venue", headerName: "Venue", flex: 1, minWidth: 160 },
@@ -87,7 +90,7 @@ export default function CityGrid({ candidates, itinerary, partnersFor, onExclude
       { headerName: "Note", width: 200, valueGetter: (p) => p.data?.excludedReason ?? p.data?.note ?? "" },
       { headerName: "", width: 80, sortable: false, filter: false, cellRenderer: (p: ICellRendererParams<Row>) => (p.data ? <button className="text-xs text-accent underline" onClick={() => onAsk(`Why ${p.data!.city}?`)}>why?</button> : null) },
     ],
-    [onAsk],
+    [onAsk, hasJoint, openerName],
   );
 
   const rowClassRules = useMemo<RowClassRules<Row>>(

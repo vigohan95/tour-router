@@ -50,6 +50,9 @@ export interface RankedCity {
   /** User (or policy) excluded this city; it stays visible but is never routed. */
   excluded?: boolean;
   excludedReason?: string;
+  /** Co-bill: the same binning on a heatmap signalled by headliner + tour opener (set by pickTourOpener). */
+  jointScore?: number;
+  jointRank?: number;
 }
 
 export interface Partner {
@@ -132,15 +135,48 @@ export interface QlooCall {
   mode: DataMode;
 }
 
+/** One act that appears in several cities' opener lists. */
+export interface TourOpenerCandidate {
+  entity_id: string;
+  name: string;
+  detail?: string;
+  /** Stops where this act is in the city's top openers. */
+  stopsAppeared: number;
+  ofStops: number;
+  meanAffinity: number;
+  cities: string[];
+}
+
+/** The co-bill view: one opener for the whole run, and the markets ranked on the pairing. */
+export interface CoBill {
+  opener: Partner;
+  stopsAppeared: number;
+  ofStops: number;
+  meanAffinity: number;
+  /** Other acts that recur across stops, best first (the tour opener excluded). */
+  alternates: TourOpenerCandidate[];
+  /** Per routed city: the local #1 opener when it is not the tour opener. */
+  locals: Record<string, string>;
+  /** "joint": one heatmap per country signalled by both acts. "averaged": the API refused two signals, so two single-signal maps were averaged. */
+  method: "joint" | "averaged";
+  methodNote: string;
+  /** Per candidate city: headliner-only vs joint affinity, and the rank under each. */
+  cities: Array<{ city: string; headliner: number; joint: number; delta: number; headlinerRank: number; jointRank: number }>;
+  computedAt: string;
+  mode: DataMode;
+}
+
 export interface CompareResult {
   /** What the taste-driven itinerary was compared against. */
-  against: "population" | "popularity" | "previous";
+  against: "population" | "popularity" | "previous" | "cobill";
   label: string;
   /** Cities routed in the taste plan but not in the baseline. */
   swappedIn: Stop[];
   /** Cities in the baseline but not in the taste plan. */
   swappedOut: Stop[];
   avgAffinity: { plan: number; baseline: number; delta: number };
+  /** Co-bill (headliner + tour opener) affinity of the same stops, when a tour opener has been picked. */
+  avgJointAffinity?: { plan: number; baseline: number; delta: number };
   totalKm: { plan: number; baseline: number; delta: number };
   estimatedCostUsd: { plan: number; baseline: number; delta: number };
   /** Openers / brands that only the taste plan carries, and ones only the baseline carries. */
@@ -160,6 +196,8 @@ export interface Plan {
   previousItinerary?: Itinerary;
   /** Last counterfactual comparison (population / popularity baseline or the previous itinerary). */
   compare?: CompareResult;
+  /** Tour opener + co-bill markets (pickTourOpener). */
+  coBill?: CoBill;
   /** Qloo requests behind this plan, newest last (capped). */
   calls: QlooCall[];
   /** The last Qloo failure; shown as a banner. Nothing is ever substituted for a failed call. */

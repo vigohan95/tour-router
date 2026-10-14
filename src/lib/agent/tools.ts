@@ -5,7 +5,7 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { REGIONS } from "../tour/cities";
-import { buildItinerary, excludeCity, explainChoice, pickPartners, rankCities, resolveArtist, setAct } from "../tour/actions";
+import { buildItinerary, coBillText, excludeCity, explainChoice, pickPartners, pickTourOpener, rankCities, resolveArtist, setAct } from "../tour/actions";
 import { compareText, compareWith } from "../tour/compare";
 import { QlooError } from "../qloo/types";
 import type { Region } from "../tour/cities";
@@ -132,15 +132,28 @@ export function buildTools(): ToolSet {
       execute: guarded("explain_choice", async ({ city }) => explainChoice(getStore().plan, city)),
     }),
 
+    pick_tour_opener: tool({
+      description: "Co-bill: pick ONE opener for the whole run from the per-city opener lists already fetched (the act that is in the most routed cities' top openers, then by mean affinity; per-city locals stay as alternates), then re-score every candidate city on the pairing with one Qloo heatmap per country signalled by headliner + opener together (signal.interests.entities with two ids). Returns the tour opener, runners-up, local alternates and each city's joint vs headliner-only affinity and rank. Read-only; needs partners for at least two routed cities.",
+      inputSchema: z.object({ opener_entity_id: z.string().optional().describe("Pick this candidate instead of the best one") }),
+      execute: guarded("pick_tour_opener", async ({ opener_entity_id }) => {
+        const store = getStore();
+        const act = requireAct();
+        const cb = await pickTourOpener(act, store.plan, store.policy, { openerEntityId: opener_entity_id });
+        store.version++;
+        return { opener: { name: cb.opener.name, detail: cb.opener.detail, stopsAppeared: cb.stopsAppeared, ofStops: cb.ofStops, meanAffinity: cb.meanAffinity }, alternates: cb.alternates.map((a) => ({ name: a.name, stopsAppeared: a.stopsAppeared, meanAffinity: a.meanAffinity })), locals: cb.locals, method: cb.method, methodNote: cb.methodNote, cities: cb.cities.slice(0, 12), summary: coBillText(act, cb) };
+      }),
+    }),
+
     compare_plans: tool({
-      description: "Counterfactual: diff the current itinerary against a baseline with the same stop count - \"population\" (biggest metros, no Qloo), \"popularity\" (Qloo listener density, not affinity) or \"previous\" (the itinerary the last rebuild replaced). Returns swapped-in / swapped-out cities, the change in average fan affinity, km and estimated cost, and the openers / brands gained or lost. Read-only. Call it after exclude_city + build_itinerary (against=previous) and whenever the user asks what Qloo changed.",
-      inputSchema: z.object({ against: z.enum(["population", "popularity", "previous"]).default("population") }),
+      description: "Counterfactual: diff the current itinerary against a baseline with the same stop count - \"population\" (the obvious route: biggest metros, no Qloo), \"popularity\" (Qloo listener density, not affinity), \"previous\" (the itinerary the last rebuild replaced) or \"cobill\" (the route a headliner + tour-opener joint heatmap would pick; picks the tour opener first if needed). Returns swapped-in / swapped-out cities, the change in average fan affinity, km and estimated cost, and the openers / brands gained or lost. Read-only. Call it after exclude_city + build_itinerary (against=previous) and whenever the user asks what Qloo changed.",
+      inputSchema: z.object({ against: z.enum(["population", "popularity", "previous", "cobill"]).default("population") }),
       execute: guarded("compare_plans", async ({ against }) => {
         const store = getStore();
         const act = requireAct();
+        if (against === "cobill" && !store.plan.coBill) await pickTourOpener(act, store.plan, store.policy);
         const r = compareWith(act, store.plan, store.policy, against);
         store.version++;
-        return { against, label: r.label, swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city), avgAffinity: r.avgAffinity, totalKm: r.totalKm, estimatedCostUsd: r.estimatedCostUsd, openers: r.openers, brands: r.brands, summary: compareText(r, act.name) };
+        return { against, label: r.label, swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city), avgAffinity: r.avgAffinity, avgJointAffinity: r.avgJointAffinity, totalKm: r.totalKm, estimatedCostUsd: r.estimatedCostUsd, openers: r.openers, brands: r.brands, summary: compareText(r, act.name) };
       }),
     }),
 

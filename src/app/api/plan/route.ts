@@ -1,7 +1,7 @@
 import { errorResponse, readBody, stateResponse, withSnapshot } from "@/lib/api";
 import { evaluateAction } from "@/lib/policy/engine";
 import { audit } from "@/lib/store";
-import { buildItinerary, excludeCity } from "@/lib/tour/actions";
+import { buildItinerary, excludeCity, pickTourOpener } from "@/lib/tour/actions";
 import { compareWith } from "@/lib/tour/compare";
 
 /**
@@ -9,12 +9,19 @@ import { compareWith } from "@/lib/tour/compare";
  * excluded cities so the grid and the agent cannot disagree).
  *   { op: "exclude", city, excluded, reason? }
  *   { op: "rebuild", cities: string[], keepOrder?: boolean, startCity?, startDate?, gapDays? }
- *   { op: "compare", against?: "population" | "popularity" | "previous" }
+ *   { op: "compare", against?: "population" | "popularity" | "previous" | "cobill" }
+ *   { op: "cobill", openerEntityId? }   tour opener + joint heatmaps (read-only Qloo calls)
  */
 export async function POST(req: Request) {
   const body = await readBody(req);
-  return withSnapshot(body, (store) => {
+  return withSnapshot(body, async (store) => {
     try {
+      if (body.op === "cobill") {
+        if (!store.plan.act) return errorResponse(new Error("No act selected"));
+        const cb = await pickTourOpener(store.plan.act, store.plan, store.policy, { openerEntityId: typeof body.openerEntityId === "string" ? body.openerEntityId : undefined });
+        audit({ actor: "user", tool: "pick_tour_opener", action: `Tour opener: ${cb.opener.name} (${cb.stopsAppeared}/${cb.ofStops} stops), co-bill heatmaps ${cb.method}`, decision: "info" });
+        return stateResponse();
+      }
       if (body.op === "exclude") {
         const city = String(body.city ?? "");
         const c = excludeCity(store.plan, city, body.excluded !== false, typeof body.reason === "string" ? body.reason : "excluded in the grid");
@@ -44,7 +51,8 @@ export async function POST(req: Request) {
       }
       if (body.op === "compare") {
         if (!store.plan.act) return errorResponse(new Error("No act selected"));
-        const against = body.against === "popularity" || body.against === "previous" ? body.against : "population";
+        const against = body.against === "popularity" || body.against === "previous" || body.against === "cobill" ? body.against : "population";
+        if (against === "cobill" && !store.plan.coBill) await pickTourOpener(store.plan.act, store.plan, store.policy);
         const r = compareWith(store.plan.act, store.plan, store.policy, against);
         audit({ actor: "user", tool: "compare_plans", action: `Compared with ${r.label}`, decision: "info", output: { swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city) } });
         return stateResponse();

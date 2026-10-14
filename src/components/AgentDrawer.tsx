@@ -15,6 +15,8 @@ const HUMAN: Record<string, string> = {
   build_itinerary: "Build itinerary",
   explain_choice: "Explain",
   exclude_city: "Exclude city",
+  compare_plans: "Compare plans",
+  pick_tour_opener: "Tour opener",
 };
 
 const human = (name: string) => HUMAN[name] ?? name.replaceAll("_", " ");

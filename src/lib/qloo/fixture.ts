@@ -236,15 +236,18 @@ export class FixtureQloo implements QlooAdapter {
   async heatmap(p: HeatmapParams): Promise<HeatmapResult> {
     await this.tick("/v2/insights", { "filter.type": "urn:heatmap", "signal.interests.entities": p.signalEntities.join(","), ...("query" in p.location ? { "filter.location.query": p.location.query } : { "filter.location": `POINT(${p.location.longitude} ${p.location.latitude})` }) });
     const artistId = p.signalEntities[0] ?? "fx:artist:unknown";
+    const signalKey = p.signalEntities.join("+") || artistId;
     // Country-wide map (what rankCities asks for): a few cells around every catalogue city of that country,
     // on one shared scale, like the live API's geohash grid. Most cities get cells; a few get none (no signal).
+    // With several signals (co-bill) the cell affinity blends every signal's city affinity, as the live API does.
     const locQuery = "query" in p.location ? p.location.query.toLowerCase() : undefined;
     const country = locQuery ? Object.entries(COUNTRY_QUERY).find(([, name]) => name.toLowerCase() === locQuery)?.[0] : undefined;
     if (country) {
       const cells = CITIES.filter((c) => c.country === country && unit(`${artistId}|${c.name}|signal`) >= 0.12).flatMap((c) => {
-        const base = cityAffinity(artistId, c);
+        const ids = p.signalEntities.length ? p.signalEntities : [artistId];
+        const base = ids.reduce((a, id) => a + cityAffinity(id, c), 0) / ids.length;
         return Array.from({ length: 4 }, (_, i) => {
-          const seed = `${artistId}|${c.name}|ccell|${i}`;
+          const seed = `${signalKey}|${c.name}|ccell|${i}`;
           return { latitude: Number((c.lat + (unit(seed + "lat") - 0.5) * 0.4).toFixed(4)), longitude: Number((c.lon + (unit(seed + "lon") - 0.5) * 0.4).toFixed(4)), affinity: Number(Math.min(0.99, Math.max(0.02, base + (unit(seed) - 0.5) * 0.2)).toFixed(3)), popularity: Number(Math.min(0.99, (Math.min(c.metroM, 10) / 10) * 0.7 + unit(seed + "pop") * 0.3).toFixed(3)) };
         });
       });

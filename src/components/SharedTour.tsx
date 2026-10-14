@@ -120,6 +120,40 @@ export default function SharedTour({ p }: { p: SharePayload }) {
         </section>
       )}
 
+      {p.cobill && (
+        <section className="mt-4 rounded-md border border-border p-3" data-section="cobill">
+          <h2 className="text-sm font-semibold">Tour opener and co-bill markets</h2>
+          <p className="mt-1 text-sm">
+            <span className="font-medium">{p.cobill.opener}</span>
+            {p.cobill.detail ? <span className="text-xs text-muted"> ({p.cobill.detail})</span> : null} is in the top openers of {p.cobill.stopsAppeared} of {p.cobill.ofStops} routed cities (mean affinity {pct(p.cobill.meanAffinity)}).
+            {Object.keys(p.cobill.locals).length ? ` Local alternates: ${Object.entries(p.cobill.locals).map(([c, n]) => `${c}: ${n}`).join("; ")}.` : ""}
+          </p>
+          <p className="mt-1 text-xs text-muted">{p.cobill.note}</p>
+          {p.stops.some((s) => s.joint !== undefined) && (
+            <table className="mt-2 text-xs tabular-nums">
+              <thead className="text-left text-[10px] uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="pr-3">stop</th>
+                  <th className="pr-3">headliner-only</th>
+                  <th className="pr-3">co-bill</th>
+                  <th>delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.stops.map((s) => (
+                  <tr key={s.city}>
+                    <td className="pr-3">{s.city}</td>
+                    <td className="pr-3">{(s.score * 100).toFixed(1)}%</td>
+                    <td className="pr-3">{s.joint !== undefined ? `${(s.joint * 100).toFixed(1)}%` : "-"}</td>
+                    <td className={s.joint !== undefined && s.joint >= s.score ? "text-ok" : "text-bad"}>{s.joint !== undefined ? `${s.joint - s.score >= 0 ? "+" : ""}${((s.joint - s.score) * 100).toFixed(1)} pts` : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
       <section className="mt-4">
         <h2 className="text-sm font-semibold">Itinerary</h2>
         <ol className="mt-2 space-y-3">
