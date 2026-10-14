@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import type { StatePayload, View } from "@/lib/api";
 import type { Policy } from "@/lib/policy/schema";
+import type { PolicyChange } from "@/lib/tour/policy-compare";
 import { buildSharePayload, sharePath } from "@/lib/tour/share";
 import type { Act, CompareResult } from "@/lib/tour/types";
 import ActSearch from "./ActSearch";
@@ -116,7 +117,19 @@ export default function TourStudio() {
     const cities = view?.plan.itinerary?.stops.map((s) => s.city) ?? [];
     if (cities.length) void call("/api/plan", { op: "rebuild", cities });
   }, [call, view]);
-  const onCompare = useCallback((against: CompareResult["against"]) => void call("/api/plan", { op: "compare", against }), [call]);
+  const [compareError, setCompareError] = useState<string | undefined>();
+  const onCompare = useCallback(
+    async (against: CompareResult["against"]) => {
+      setCompareError(await call("/api/plan", { op: "compare", against }));
+    },
+    [call],
+  );
+  const onComparePolicy = useCallback(
+    async (change: PolicyChange) => {
+      setCompareError(await call("/api/plan", { op: "compare", against: "policy", change }));
+    },
+    [call],
+  );
   const [coBillBusy, setCoBillBusy] = useState(false);
   const [coBillError, setCoBillError] = useState<string | undefined>();
   const onCoBill = useCallback(
@@ -220,7 +233,7 @@ export default function TourStudio() {
           <PartnerCards partners={plan.partners} itinerary={plan.itinerary} holds={policy.heldVenues} />
           <CoBillPanel act={plan.act} coBill={plan.coBill} partnersCount={partnersFor.length} busy={busy || coBillBusy} error={coBillError} onPick={onCoBill} onCompare={() => onCompare("cobill")} />
           <ItineraryPanel itinerary={plan.itinerary} onReroute={onReroute} onShare={share} shared={shared} />
-          <ComparePanel itinerary={plan.itinerary} compare={plan.compare} busy={busy} onCompare={onCompare} />
+          <ComparePanel itinerary={plan.itinerary} compare={plan.compare} busy={busy} onCompare={onCompare} onComparePolicy={onComparePolicy} error={compareError} />
           <QlooCallsPanel calls={plan.calls ?? []} mode={view.mode} />
           {showAudit && (
             <div className="card" data-panel="audit">

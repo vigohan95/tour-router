@@ -67,6 +67,8 @@ export interface SharedCompare {
   openers: CompareResult["openers"];
   brands: CompareResult["brands"];
   baselineStops: Array<{ order: number; city: string; score: number }>;
+  /** Policy counterfactual: the one changed field and the decisions that flip. */
+  policy?: { label: string; flips: string[] };
 }
 
 export interface SharePayload {
@@ -116,7 +118,7 @@ export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[
   const candidates: SharedCandidate[] = plan.candidates.slice(0, 40).map((c) => ({ city: c.city, country: c.country, score: c.score, popularity: c.popularity, rank: c.rank, popularityRank: c.popularityRank, populationRank: c.populationRank, lift: c.lift, excluded: c.excluded, noSignal: c.noSignal }));
   const cmp = plan.compare;
   const compare: SharedCompare | undefined = cmp
-    ? { against: cmp.against, label: cmp.label, swappedIn: cmp.swappedIn.map((s) => s.city), swappedOut: cmp.swappedOut.map((s) => s.city), avgAffinity: cmp.avgAffinity, totalKm: cmp.totalKm, openers: cmp.openers, brands: cmp.brands, baselineStops: cmp.baseline.stops.map((s) => ({ order: s.order, city: s.city, score: s.score })) }
+    ? { against: cmp.against, label: cmp.label, swappedIn: cmp.swappedIn.map((s) => s.city), swappedOut: cmp.swappedOut.map((s) => s.city), avgAffinity: cmp.avgAffinity, totalKm: cmp.totalKm, openers: cmp.openers, brands: cmp.brands, baselineStops: cmp.baseline.stops.map((s) => ({ order: s.order, city: s.city, score: s.score })), policy: cmp.policy ? { label: cmp.policy.label, flips: cmp.policy.decisions.filter((d) => d.underA !== d.underB).map((d) => `${d.action}: ${d.underA === "allow" ? "allowed" : d.underA === "approve" ? "needs approval" : "denied"} under A, ${d.underB === "allow" ? "allowed" : d.underB === "approve" ? "needs approval" : "denied"} under B [${d.underB === "allow" ? d.ruleA : d.ruleB}]`) } : undefined }
     : undefined;
   const count = (d: AuditEntry["decision"]) => audit.filter((a) => a.decision === d).length;
   const endpoints = new Map<string, { endpoint: string; type: string; n: number }>();

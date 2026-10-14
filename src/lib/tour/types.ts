@@ -166,9 +166,21 @@ export interface CoBill {
   mode: DataMode;
 }
 
+export interface PolicyCounterfactual {
+  field: string;
+  from: string;
+  to: string;
+  label: string;
+  decisions: Array<{ action: string; underA: "allow" | "approve" | "deny"; underB: "allow" | "approve" | "deny"; ruleA: string; ruleB: string; reasonB: string }>;
+  stopsA: number;
+  stopsB: number;
+}
+
 export interface CompareResult {
   /** What the taste-driven itinerary was compared against. */
-  against: "population" | "popularity" | "previous" | "cobill";
+  against: "population" | "popularity" | "previous" | "cobill" | "policy";
+  /** Policy counterfactual: the one field that differs between A (current) and B, and the decisions that flip. */
+  policy?: PolicyCounterfactual;
   label: string;
   /** Cities routed in the taste plan but not in the baseline. */
   swappedIn: Stop[];

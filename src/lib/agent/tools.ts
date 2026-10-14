@@ -7,6 +7,7 @@ import { z } from "zod";
 import { REGIONS } from "../tour/cities";
 import { buildItinerary, coBillText, excludeCity, explainChoice, pickPartners, pickTourOpener, rankCities, resolveArtist, setAct } from "../tour/actions";
 import { compareText, compareWith } from "../tour/compare";
+import { POLICY_FIELDS, type PolicyChange } from "../tour/policy-compare";
 import { QlooError } from "../qloo/types";
 import type { Region } from "../tour/cities";
 import { evaluateAction, type Evaluation } from "../policy/engine";
@@ -145,15 +146,18 @@ export function buildTools(): ToolSet {
     }),
 
     compare_plans: tool({
-      description: "Counterfactual: diff the current itinerary against a baseline with the same stop count - \"population\" (the obvious route: biggest metros, no Qloo), \"popularity\" (Qloo listener density, not affinity), \"previous\" (the itinerary the last rebuild replaced) or \"cobill\" (the route a headliner + tour-opener joint heatmap would pick; picks the tour opener first if needed). Returns swapped-in / swapped-out cities, the change in average fan affinity, km and estimated cost, and the openers / brands gained or lost. Read-only. Call it after exclude_city + build_itinerary (against=previous) and whenever the user asks what Qloo changed.",
-      inputSchema: z.object({ against: z.enum(["population", "popularity", "previous", "cobill"]).default("population") }),
-      execute: guarded("compare_plans", async ({ against }) => {
+      description: "Counterfactual: diff the current itinerary against a baseline with the same stop count - \"population\" (the obvious route: biggest metros, no Qloo), \"popularity\" (Qloo listener density, not affinity), \"previous\" (the itinerary the last rebuild replaced), \"cobill\" (the route a headliner + tour-opener joint heatmap would pick; picks the tour opener first if needed) or \"policy\" (the same brief under policy B = the current policy with ONE field changed, given in `change`; rebuilt from the cached ranking, no Qloo call; returns the decisions that flip, e.g. allowed under A, denied under B). Returns swapped-in / swapped-out cities, the change in average fan affinity, km and estimated cost, and the openers / brands gained or lost. Read-only. Call it after exclude_city + build_itinerary (against=previous) and whenever the user asks what Qloo changed or what another rule would change.",
+      inputSchema: z.object({
+        against: z.enum(["population", "popularity", "previous", "cobill", "policy"]).default("population"),
+        change: z.object({ field: z.enum(POLICY_FIELDS as [string, ...string[]]), value: z.union([z.number(), z.string(), z.array(z.string()), z.null()]).describe("maxCities / minKmBetweenStops / minGapDays: number; maxKmPerLeg: number or null; excludeCities / blackoutDates: names or yyyy-mm-dd dates to add") }).optional().describe("Required for against=policy"),
+      }),
+      execute: guarded("compare_plans", async ({ against, change }) => {
         const store = getStore();
         const act = requireAct();
         if (against === "cobill" && !store.plan.coBill) await pickTourOpener(act, store.plan, store.policy);
-        const r = compareWith(act, store.plan, store.policy, against);
+        const r = compareWith(act, store.plan, store.policy, against, change ? { change: change as PolicyChange } : {});
         store.version++;
-        return { against, label: r.label, swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city), avgAffinity: r.avgAffinity, avgJointAffinity: r.avgJointAffinity, totalKm: r.totalKm, estimatedCostUsd: r.estimatedCostUsd, openers: r.openers, brands: r.brands, summary: compareText(r, act.name) };
+        return { against, label: r.label, swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city), avgAffinity: r.avgAffinity, avgJointAffinity: r.avgJointAffinity, totalKm: r.totalKm, estimatedCostUsd: r.estimatedCostUsd, openers: r.openers, brands: r.brands, policy: r.policy, summary: compareText(r, act.name) };
       }),
     }),
 

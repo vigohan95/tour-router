@@ -3,13 +3,14 @@ import { evaluateAction } from "@/lib/policy/engine";
 import { audit } from "@/lib/store";
 import { buildItinerary, excludeCity, pickTourOpener } from "@/lib/tour/actions";
 import { compareWith } from "@/lib/tour/compare";
+import type { PolicyChange } from "@/lib/tour/policy-compare";
 
 /**
  * Direct plan edits from the grid (the human's own decisions, so no approval card; the policy still refuses
  * excluded cities so the grid and the agent cannot disagree).
  *   { op: "exclude", city, excluded, reason? }
  *   { op: "rebuild", cities: string[], keepOrder?: boolean, startCity?, startDate?, gapDays? }
- *   { op: "compare", against?: "population" | "popularity" | "previous" | "cobill" }
+ *   { op: "compare", against?: "population" | "popularity" | "previous" | "cobill" | "policy", change?: { field, value } }
  *   { op: "cobill", openerEntityId? }   tour opener + joint heatmaps (read-only Qloo calls)
  */
 export async function POST(req: Request) {
@@ -51,10 +52,11 @@ export async function POST(req: Request) {
       }
       if (body.op === "compare") {
         if (!store.plan.act) return errorResponse(new Error("No act selected"));
-        const against = body.against === "popularity" || body.against === "previous" || body.against === "cobill" ? body.against : "population";
+        const against = body.against === "popularity" || body.against === "previous" || body.against === "cobill" || body.against === "policy" ? body.against : "population";
         if (against === "cobill" && !store.plan.coBill) await pickTourOpener(store.plan.act, store.plan, store.policy);
-        const r = compareWith(store.plan.act, store.plan, store.policy, against);
-        audit({ actor: "user", tool: "compare_plans", action: `Compared with ${r.label}`, decision: "info", output: { swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city) } });
+        const change = body.change && typeof body.change === "object" ? (body.change as PolicyChange) : undefined;
+        const r = compareWith(store.plan.act, store.plan, store.policy, against, change ? { change } : {});
+        audit({ actor: "user", tool: "compare_plans", action: r.policy ? `Compared under policy B (${r.policy.label})` : `Compared with ${r.label}`, decision: "info", output: { swappedIn: r.swappedIn.map((s) => s.city), swappedOut: r.swappedOut.map((s) => s.city), ...(r.policy ? { flips: r.policy.decisions.filter((d) => d.underA !== d.underB).map((d) => `${d.action}: ${d.underA} under A, ${d.underB} under B [${d.ruleB}]`) } : {}) } });
         return stateResponse();
       }
       return errorResponse(new Error("Unknown op"));

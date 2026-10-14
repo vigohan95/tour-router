@@ -95,14 +95,22 @@ export default function SharedTour({ p }: { p: SharePayload }) {
 
       {p.compare && (
         <section className="mt-4 rounded-md border border-border p-3" data-section="compare">
-          <h2 className="text-sm font-semibold">What taste changed vs {p.compare.label}</h2>
+          <h2 className="text-sm font-semibold">{p.compare.against === "policy" && p.compare.policy ? `Same brief under policy B (${p.compare.policy.label})` : p.compare.against === "cobill" ? `Headliner-only route vs ${p.compare.label}` : `What taste changed vs ${p.compare.label}`}</h2>
+          {p.compare.policy && (
+            <ul className="mt-1 text-xs text-muted">
+              {p.compare.policy.flips.length === 0 && <li>No decision flips between the two policies; only the numbers below differ.</li>}
+              {p.compare.policy.flips.map((f, i) => (
+                <li key={i}>{f}</li>
+              ))}
+            </ul>
+          )}
           <div className="mt-2 grid gap-3 text-sm md:grid-cols-3">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-ok">Taste route adds</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-ok">{p.compare.against === "policy" ? "Only under policy A (current)" : p.compare.against === "cobill" ? "Headliner-only route keeps" : "Taste route adds"}</div>
               <div>{p.compare.swappedIn.join(", ") || "nothing"}</div>
             </div>
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-bad">Baseline would pick instead</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-bad">{p.compare.against === "policy" ? "Only under policy B" : p.compare.against === "cobill" ? "Co-bill route would pick instead" : "Baseline would pick instead"}</div>
               <div>{p.compare.swappedOut.join(", ") || "nothing"}</div>
             </div>
             <div className="text-xs tabular-nums">

@@ -9,6 +9,7 @@ import type { Policy } from "../policy/schema";
 import { CITIES } from "./cities";
 import { makeItinerary, type BuildOptions } from "./actions";
 import { respectRadius } from "./legs";
+import { FIELD_LABEL, applyChange, decisionDiff, describeValue, routeUnderPolicy, type PolicyChange } from "./policy-compare";
 import type { Act, CompareResult, Itinerary, Plan, RankedCity, Stop } from "./types";
 import { BASELINE_LABEL } from "./compare-text";
 
@@ -70,11 +71,20 @@ export function comparePlans(plan: Itinerary, baseline: Itinerary, against: Comp
  * and dates, routed the same way; or with the itinerary the last rebuild replaced. Stores the result on the plan.
  * Baseline stops only carry partners for cities whose partners were already fetched (nothing is invented).
  */
-export function compareWith(act: Act, plan: Plan, policy: Policy, against: CompareResult["against"], opts: Partial<BuildOptions> = {}, now = new Date()): CompareResult {
+export function compareWith(act: Act, plan: Plan, policy: Policy, against: CompareResult["against"], opts: Partial<BuildOptions> & { change?: PolicyChange } = {}, now = new Date()): CompareResult {
   const current = plan.itinerary;
   if (!current) throw new Error("No itinerary to compare yet; build one first.");
   let baseline: Itinerary;
-  if (against === "previous") {
+  let policyDiff: CompareResult["policy"];
+  if (against === "policy") {
+    if (!opts.change) throw new Error("Policy B needs one change: { field, value } (maxCities, excludeCities, minKmBetweenStops, blackoutDates, maxKmPerLeg or minGapDays).");
+    const policyB = applyChange(policy, opts.change);
+    baseline = routeUnderPolicy(act, plan, policyB, current, opts.change.field, now);
+    const from = describeValue(policy, opts.change.field);
+    const to = describeValue(policyB, opts.change.field);
+    if (from === to) throw new Error(`Policy B is identical to policy A (${FIELD_LABEL[opts.change.field]} stays ${from}).`);
+    policyDiff = { field: opts.change.field, from, to, label: `${FIELD_LABEL[opts.change.field]} ${from} -> ${to}`, decisions: decisionDiff(plan, policy, policyB, current, baseline), stopsA: current.stops.length, stopsB: baseline.stops.length };
+  } else if (against === "previous") {
     if (!plan.previousItinerary) throw new Error("There is no previous itinerary to compare with.");
     baseline = plan.previousItinerary;
   } else {
@@ -88,6 +98,7 @@ export function compareWith(act: Act, plan: Plan, policy: Policy, against: Compa
   }
   const joint = plan.coBill ? new Map(plan.candidates.filter((c) => c.jointScore !== undefined).map((c) => [c.city, c.jointScore!])) : undefined;
   const result = comparePlans(current, baseline, against, now, joint);
+  if (policyDiff) result.policy = policyDiff;
   plan.compare = result;
   return result;
 }

@@ -143,7 +143,7 @@ export type Intent = "plan" | "explain" | "exclude" | "compare" | "opener" | "st
 
 export function detectIntent(text: string): Intent {
   const t = text.toLowerCase();
-  if (/\b(compare|counterfactual|what if|without qloo|ignored? taste|population[- ]only|by population|popularity[- ]only|what did qloo change|baseline)\b/.test(t)) return "compare";
+  if (/\b(compare|counterfactual|what if|without qloo|ignored? taste|population[- ]only|by population|popularity[- ]only|what did qloo change|baseline|policy b)\b/.test(t)) return "compare";
   if (/\b(tour[- ]opener|co-?bill|package tour|support act|who should open|open the (whole |entire )?(tour|run)|opener for the (whole |entire )?(tour|run))\b/.test(t)) return "opener";
   if (/\b(why|explain|reason|how come)\b/.test(t)) return "explain";
   if (/\b(skip|avoid|drop|exclude|remove|not|without|no)\b/.test(t) && parseCities(text).length > 0) return "exclude";
@@ -261,11 +261,30 @@ function openerPlaybook(turn: Turn): Action {
   return { type: "text", text: o ? `I could not pick a tour opener: ${o}.` : s(r.output.summary) };
 }
 
+/** "what if the cap were 8" / "compare under policy B with min km 300" / "what if I excluded Denver" / "what if 2027-03-05 were a blackout" */
+export function parsePolicyChange(text: string): { field: string; value: number | string[] } | undefined {
+  const t = text.toLowerCase();
+  const cap = t.match(/\b(?:cap|max(?:imum)? cities|maxcities|city cap)\b\D{0,20}?(\d{1,2})\b/) ?? t.match(/\b(\d{1,2})[- ]city cap\b/);
+  if (cap) return { field: "maxCities", value: Number(cap[1]) };
+  const km = t.match(/\b(?:radius|min(?:imum)? km|minkmbetweenstops|km between stops)\b\D{0,25}?(\d{2,4})\b/) ?? t.match(/\b(\d{2,4})\s*km\b/);
+  if (km && !/per leg|leg/.test(t)) return { field: "minKmBetweenStops", value: Number(km[1]) };
+  const leg = t.match(/\b(\d{3,5})\s*km\b.*\bleg\b/) ?? t.match(/\bleg\b\D{0,25}?(\d{3,5})\s*km/);
+  if (leg) return { field: "maxKmPerLeg", value: Number(leg[1]) };
+  const gap = t.match(/\b(\d{1,2})\s*days?\s*(?:between|gap|apart)\b/) ?? t.match(/\bgap\b\D{0,15}?(\d{1,2})\b/);
+  if (gap) return { field: "minGapDays", value: Number(gap[1]) };
+  const dates = text.match(/\b\d{4}-\d{2}-\d{2}\b/g);
+  if (dates && /blackout|day off|dark/.test(t)) return { field: "blackoutDates", value: dates };
+  const cities = parseCities(text);
+  if (cities.length && /exclud|without|skip|avoid|drop|ban/.test(t)) return { field: "excludeCities", value: cities };
+  return undefined;
+}
+
 function comparePlaybook(turn: Turn): Action {
   const t = turn.userText.toLowerCase();
-  const against = /previous|last|before/.test(t) ? "previous" : /co-?bill|joint|tour[- ]opener|package/.test(t) ? "cobill" : /popularity|listener|density/.test(t) ? "popularity" : "population";
+  const change = /policy b|what if|under a policy|if (?:the|my|i) /.test(t) ? parsePolicyChange(turn.userText) : undefined;
+  const against = change ? "policy" : /previous|last|before/.test(t) ? "previous" : /co-?bill|joint|tour[- ]opener|package/.test(t) ? "cobill" : /popularity|listener|density/.test(t) ? "popularity" : "population";
   const r = first(turn, "compare_plans");
-  if (!r) return { type: "calls", calls: [{ toolName: "compare_plans", input: { against } }] };
+  if (!r) return { type: "calls", calls: [{ toolName: "compare_plans", input: change ? { against, change } : { against } }] };
   const o = outcome(r);
   return { type: "text", text: o ? `I could not compare: ${o}.` : s(r.output.summary) };
 }
@@ -317,7 +336,8 @@ const HELP = `I route tours with Qloo's taste data. Try:
 - "Plan a 10-city North American tour for Nova Reyes"
 - "Route Max Ortega through 8 cities in the UK starting in London in March 2027"
 - "Why Denver?" / "Skip Phoenix and Las Vegas"
-- "Who should open the whole tour?" / "Compare the co-bill route"`;
+- "Who should open the whole tour?" / "Compare the co-bill route"
+- "What if the cap were 8?" / "Compare under policy B with a 300 km radius"`;
 
 export function plan(turn: Turn): Action {
   switch (detectIntent(turn.userText)) {
