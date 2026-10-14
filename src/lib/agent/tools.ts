@@ -5,7 +5,7 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { REGIONS } from "../tour/cities";
-import { buildItinerary, coBillText, excludeCity, explainChoice, pickPartners, pickTourOpener, rankCities, resolveArtist, setAct } from "../tour/actions";
+import { audienceProfile, buildItinerary, coBillText, excludeCity, explainChoice, pickPartners, pickTourOpener, rankCities, resolveArtist, setAct } from "../tour/actions";
 import { compareText, compareWith } from "../tour/compare";
 import { POLICY_FIELDS, type PolicyChange } from "../tour/policy-compare";
 import { whyNot } from "../tour/why-not";
@@ -95,8 +95,17 @@ export function buildTools(): ToolSet {
         const ranked = await rankCities(act, store.policy, { regions: regions as Region[] | undefined, limit, only });
         store.plan.candidates = ranked;
         store.plan.region = (regions as Region[] | undefined) ?? (store.policy.regions as Region[]);
+        // One cached urn:demographics call for the audience card; a failure here never fails the ranking.
+        let audience: string | undefined;
+        if (!store.plan.audience) {
+          try {
+            audience = (await audienceProfile(act, store.plan))?.summary;
+          } catch {
+            audience = undefined;
+          }
+        } else audience = store.plan.audience.summary;
         store.version++;
-        return { act: act.name, count: ranked.length, cities: ranked.map((c) => ({ rank: c.rank, city: c.city, country: c.country, score: c.score, index: c.index, popularityRank: c.popularityRank, populationRank: c.populationRank, lift: c.lift, excluded: c.excluded ?? false, ...(c.noSignal ? { unscored: c.note ?? "no Qloo signal" } : {}) })) };
+        return { act: act.name, count: ranked.length, audience, cities: ranked.map((c) => ({ rank: c.rank, city: c.city, country: c.country, score: c.score, index: c.index, popularityRank: c.popularityRank, populationRank: c.populationRank, lift: c.lift, excluded: c.excluded ?? false, ...(c.noSignal ? { unscored: c.note ?? "no Qloo signal" } : {}) })) };
       }),
     }),
 

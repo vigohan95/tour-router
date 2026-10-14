@@ -198,8 +198,20 @@ export interface CompareResult {
   computedAt: string;
 }
 
+/** Qloo demographics for the act: over/under-index per bucket (-1..1). Shown as a small audience card, nothing more is claimed. */
+export interface Audience {
+  age: Array<{ bucket: string; label: string; value: number }>;
+  gender: Array<{ bucket: string; label: string; value: number }>;
+  /** The buckets that over-index most, for one sentence. */
+  summary: string;
+  mode: DataMode;
+  computedAt: string;
+}
+
 export interface Plan {
   act?: Act;
+  /** urn:demographics for the act (one cached call), when the adapter supports it. */
+  audience?: Audience;
   region?: Region[];
   candidates: RankedCity[];
   partners: Record<string, CityPartners>;

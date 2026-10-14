@@ -100,6 +100,8 @@ export interface SharePayload {
   stops: SharedStop[];
   candidates: SharedCandidate[];
   compare?: SharedCompare;
+  /** Qloo demographics for the act: one sentence (over/under-index, not shares). */
+  audience?: string;
   cobill?: { opener: string; detail?: string; stopsAppeared: number; ofStops: number; meanAffinity: number; method: "joint" | "averaged"; note: string; locals: Record<string, string> };
   policy: { maxCities: number; budgetPerCity: number; regions: string[]; excludeCities: string[]; venue: { minCapacity: number; maxCapacity: number }; minGapDays: number; blackoutDates?: string[]; heldVenues?: Array<{ city: string; venue: string; date: string }>; minKmBetweenStops?: number; maxKmPerLeg?: number; approvals?: { itinerary: "auto" | "ask"; alwaysAsk: string[]; neverAllow: string[] } };
   audit: {
@@ -197,6 +199,7 @@ function buildSharePayloadUnbounded(plan: Plan, policy: Policy, audit: AuditEntr
     stops,
     candidates,
     compare,
+    audience: plan.audience?.summary,
     cobill: plan.coBill ? { opener: plan.coBill.opener.name, detail: plan.coBill.opener.detail, stopsAppeared: plan.coBill.stopsAppeared, ofStops: plan.coBill.ofStops, meanAffinity: plan.coBill.meanAffinity, method: plan.coBill.method, note: plan.coBill.methodNote, locals: plan.coBill.locals } : undefined,
     policy: { maxCities: policy.maxCities, budgetPerCity: policy.budgetPerCity, regions: policy.regions, excludeCities: policy.excludeCities, venue: policy.venue, minGapDays: policy.minGapDays, blackoutDates: policy.blackoutDates, heldVenues: policy.heldVenues, minKmBetweenStops: policy.minKmBetweenStops, maxKmPerLeg: policy.maxKmPerLeg, approvals: { itinerary: policy.approvals.itinerary, alwaysAsk: policy.approvals.alwaysAsk, neverAllow: policy.approvals.neverAllow } },
     audit: {

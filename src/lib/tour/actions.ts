@@ -17,7 +17,7 @@ import { heldFor, isExcluded } from "../policy/schema";
 import { getStore, touch } from "../store";
 import { COUNTRY_QUERY, citiesIn, findCity, qlooLocality, type City, type Region } from "./cities";
 import { haversineKm, pathKm, routeOrder, showDates } from "./route";
-import { partnerFromEntity, type Act, type CityPartners, type CoBill, type Itinerary, type Partner, type Plan, type RankedCity, type Stop, type TourOpenerCandidate } from "./types";
+import { partnerFromEntity, type Act, type Audience, type CityPartners, type CoBill, type Itinerary, type Partner, type Plan, type RankedCity, type Stop, type TourOpenerCandidate } from "./types";
 
 /** Heatmap cells within this distance of a city centre count for that city (country maps are geohash-4/5, ~20-40 km cells). */
 export const HEATMAP_RADIUS_KM = 60;
@@ -68,6 +68,7 @@ export function setAct(plan: Plan, act: Act) {
     plan.previousItinerary = undefined;
     plan.compare = undefined;
     plan.coBill = undefined;
+    plan.audience = undefined;
   }
   plan.act = act;
   touch();
@@ -460,4 +461,36 @@ export function coBillText(act: Act, cb: CoBill): string {
   if (up.length) parts.push(`The pairing lifts ${up.map((r) => `${r.city} (#${r.headlinerRank} -> #${r.jointRank})`).join(", ")}.`);
   if (down.length) parts.push(`It costs ${down.map((r) => `${r.city} (#${r.headlinerRank} -> #${r.jointRank})`).join(", ")}.`);
   return parts.join(" ");
+}
+
+/* ---------------- audience (urn:demographics) ---------------- */
+
+export const AGE_LABELS: Record<string, string> = { "24_and_younger": "24 and younger", "25_to_29": "25-29", "30_to_34": "30-34", "35_to_44": "35-44", "45_to_54": "45-54", "55_and_older": "55 and older" };
+const GENDER_LABELS: Record<string, string> = { male: "male", female: "female" };
+const signedPct = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
+
+/**
+ * One cached `urn:demographics` call for the act: Qloo's over/under-index per age and gender bucket (-1..1).
+ * Stored on the plan for the audience card. Returns undefined when the adapter has no demographics method.
+ */
+export async function audienceProfile(act: Act, plan: Plan, qloo: QlooAdapter = getQloo(), now = new Date()): Promise<Audience | undefined> {
+  if (!qloo.demographics) return undefined;
+  const d = await qloo.demographics([act.entity_id]);
+  const order = Object.keys(AGE_LABELS);
+  const age = Object.entries(d.age)
+    .map(([bucket, value]) => ({ bucket, label: AGE_LABELS[bucket] ?? bucket.replaceAll("_", " "), value }))
+    .sort((a, b) => (order.indexOf(a.bucket) === -1 ? 99 : order.indexOf(a.bucket)) - (order.indexOf(b.bucket) === -1 ? 99 : order.indexOf(b.bucket)));
+  const gender = Object.entries(d.gender).map(([bucket, value]) => ({ bucket, label: GENDER_LABELS[bucket] ?? bucket, value }));
+  const topAge = [...age].sort((a, b) => b.value - a.value)[0];
+  const lowAge = [...age].sort((a, b) => a.value - b.value)[0];
+  const lean = [...gender].sort((a, b) => b.value - a.value)[0];
+  const parts: string[] = [];
+  if (topAge && topAge.value > 0) parts.push(`over-indexes most with ${topAge.label} (${signedPct(topAge.value)})`);
+  if (lowAge && lowAge.value < 0) parts.push(`under-indexes with ${lowAge.label} (${signedPct(lowAge.value)})`);
+  if (lean && Math.abs(lean.value) >= 0.05) parts.push(`leans ${lean.label} (${signedPct(lean.value)})`);
+  const summary = parts.length ? `${act.name}'s audience ${parts.join(", ")} on Qloo's demographics.` : `${act.name}'s audience is flat across Qloo's demographic buckets.`;
+  const audience: Audience = { age, gender, summary, mode: qloo.mode, computedAt: now.toISOString() };
+  plan.audience = audience;
+  touch();
+  return audience;
 }

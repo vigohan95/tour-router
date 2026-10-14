@@ -10,6 +10,7 @@ import type { PolicyChange } from "@/lib/tour/policy-compare";
 import { buildSharePayload, sharePath } from "@/lib/tour/share";
 import type { Act, CompareResult } from "@/lib/tour/types";
 import ActSearch from "./ActSearch";
+import AudienceCard from "./AudienceCard";
 import AgentDrawer, { type ChatMessage } from "./AgentDrawer";
 import CityGrid from "./CityGrid";
 import CoBillPanel from "./CoBillPanel";
@@ -220,6 +221,7 @@ export default function TourStudio() {
       <div className="grid flex-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <main className="flex min-w-0 flex-col gap-3">
           <ActSearch act={plan.act} mode={view.mode} onPick={pickAct} onPlan={(p) => setPending(p)} />
+          {plan.audience && plan.act && <AudienceCard act={plan.act} audience={plan.audience} />}
           <CityGrid candidates={plan.candidates} itinerary={plan.itinerary} partnersFor={partnersFor} onExclude={onExclude} onReorder={onReorder} onAsk={ask} openerName={plan.coBill?.opener.name} />
           <div className="card h-[380px]">
             <div className="mb-2 flex items-center gap-2">

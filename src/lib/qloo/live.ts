@@ -8,7 +8,7 @@
  * - Errors surface as QlooError with status + body; nothing is retried silently and nothing is invented.
  */
 import { reportCall } from "./calls";
-import { ENTITY_TYPES, QlooError, type Contribution, type EntityType, type HeatmapCell, type HeatmapParams, type HeatmapResult, type InsightEntity, type InsightsParams, type InsightsResult, type QlooAdapter, type SearchHit } from "./types";
+import { ENTITY_TYPES, QlooError, type Contribution, type DemographicsResult, type EntityType, type HeatmapCell, type HeatmapParams, type HeatmapResult, type InsightEntity, type InsightsParams, type InsightsResult, type QlooAdapter, type SearchHit } from "./types";
 
 type J = Record<string, unknown>;
 const j = (v: unknown): J => (v && typeof v === "object" && !Array.isArray(v) ? (v as J) : {});
@@ -143,6 +143,21 @@ export function parseHeatmapCell(raw: unknown): HeatmapCell | undefined {
   const affinity = num(q.affinity) ?? num(o.affinity);
   if (lat === undefined || lon === undefined || affinity === undefined) return undefined;
   return { latitude: lat, longitude: lon, geohash: str(loc.geohash), affinity, affinity_rank: num(q.affinity_rank), popularity: num(q.popularity) };
+}
+
+/** `results.demographics[0].query.{age,gender}`; buckets are numbers in -1..1 (anything else is dropped). */
+export function parseDemographics(body: unknown): DemographicsResult {
+  const first = j(arr(j(j(body).results).demographics)[0]);
+  const query = j(first.query);
+  const bucket = (v: unknown): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const [k, x] of Object.entries(j(v))) {
+      const n = num(x);
+      if (n !== undefined) out[k] = n;
+    }
+    return out;
+  };
+  return { age: bucket(query.age), gender: bucket(query.gender), raw: body };
 }
 
 /* ---------------- query building ---------------- */
@@ -280,6 +295,11 @@ export class LiveQloo implements QlooAdapter {
     const results = j(body.results);
     const cells = arr(results.heatmap).map(parseHeatmapCell).filter((c): c is HeatmapCell => !!c);
     return { cells, raw: body };
+  }
+
+  async demographics(signalEntities: string[]): Promise<DemographicsResult> {
+    const body = await this.get("/v2/insights", { "filter.type": "urn:demographics", "signal.interests.entities": signalEntities.join(",") });
+    return parseDemographics(body);
   }
 
   clearCache() {

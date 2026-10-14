@@ -114,6 +114,18 @@ export interface HeatmapResult {
   raw?: unknown;
 }
 
+/**
+ * `filter.type=urn:demographics` (verified 2026-10-13): `results.demographics[0].query.{age, gender}`, each bucket an
+ * over/under-index from -1 to 1 for the signal entity. Not a share of the audience and not a count.
+ */
+export interface DemographicsResult {
+  /** e.g. 24_and_younger, 25_to_29, 30_to_34, 35_to_44, 45_to_54, 55_and_older */
+  age: Record<string, number>;
+  /** male, female */
+  gender: Record<string, number>;
+  raw?: unknown;
+}
+
 /** Where a value came from. The UI shows this on every card so judges never mistake fixtures for live data. */
 export type DataMode = "fixture" | "live";
 
@@ -122,6 +134,8 @@ export interface QlooAdapter {
   search(query: string, types?: EntityType[], take?: number): Promise<SearchHit[]>;
   insights(params: InsightsParams): Promise<InsightsResult>;
   heatmap(params: HeatmapParams): Promise<HeatmapResult>;
+  /** urn:demographics for the signal entities (optional: test doubles may omit it; the audience card is then skipped). */
+  demographics?(signalEntities: string[]): Promise<DemographicsResult>;
 }
 
 export class QlooError extends Error {

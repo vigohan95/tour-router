@@ -10,7 +10,7 @@
  */
 import { CITIES, COUNTRY_QUERY, findCity, type City } from "../tour/cities";
 import { reportCall } from "./calls";
-import type { Contribution, EntityType, HeatmapParams, HeatmapResult, InsightEntity, InsightsParams, InsightsResult, QlooAdapter, SearchHit } from "./types";
+import type { Contribution, DemographicsResult, EntityType, HeatmapParams, HeatmapResult, InsightEntity, InsightsParams, InsightsResult, QlooAdapter, SearchHit } from "./types";
 
 /* ---------------- deterministic randomness ---------------- */
 
@@ -231,6 +231,16 @@ export class FixtureQloo implements QlooAdapter {
     const seen = new Set<string>();
     entities = entities.filter((e) => (seen.has(e.entity_id) ? false : (seen.add(e.entity_id), true))).sort((a, b) => b.affinity - a.affinity);
     return { entities, query: { fixture: true, params: p } };
+  }
+
+  /** Synthetic over/under-index per bucket in -1..1, deterministic per act; the live shape (verified 2026-10-13). */
+  async demographics(signalEntities: string[]): Promise<DemographicsResult> {
+    await this.tick("/v2/insights", { "filter.type": "urn:demographics", "signal.interests.entities": signalEntities.join(",") }, 1);
+    const id = signalEntities[0] ?? "fx:artist:unknown";
+    const v = (k: string) => Number(((unit(`${id}|demo|${k}`) - 0.5) * 1.6).toFixed(3));
+    const age = Object.fromEntries(["24_and_younger", "25_to_29", "30_to_34", "35_to_44", "45_to_54", "55_and_older"].map((k) => [k, v(k)]));
+    const male = v("male");
+    return { age, gender: { male, female: Number((-male).toFixed(3)) }, raw: { fixture: true } };
   }
 
   async heatmap(p: HeatmapParams): Promise<HeatmapResult> {

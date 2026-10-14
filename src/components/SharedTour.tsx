@@ -78,6 +78,7 @@ export default function SharedTour({ p }: { p: SharePayload }) {
         </div>
       </header>
 
+      {p.audience && <p className="mt-2 text-xs text-muted" data-section="audience">Qloo demographics: {p.audience} (over/under-index per bucket, not an audience share.)</p>}
       {p.mode === "fixture" && <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">This plan was made on synthetic fixtures: every name and score was generated from a hash. It shows the product flow, not Qloo data.</div>}
 
       <section className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr]">
