@@ -31,6 +31,29 @@ function Partner({ p, tag }: { p?: SharedPartner; tag: string }) {
 
 const lift = (n?: number) => (n === undefined ? "" : n > 0 ? `+${n}` : String(n));
 
+/** Approval / denial lines: where the agent asked and where it was refused (plus errors), newest first. */
+const gated = (p: SharePayload) => (p.audit.entries ?? []).filter((a) => a.decision === "approval-required" || a.decision === "denied" || a.decision === "approved" || a.decision === "error");
+
+/** The policy as sentences, with the fields the audit cited marked. */
+function rules(p: SharePayload): Array<{ field: string; text: string; cited: boolean }> {
+  const cited = new Set((p.audit.entries ?? []).map((a) => a.rule).filter((r): r is string => !!r));
+  const pol = p.policy;
+  const out: Array<{ field: string; text: string }> = [
+    { field: "maxCities", text: `at most ${pol.maxCities} cities without asking` },
+    { field: "budgetPerCity", text: `venue budget ${usd(pol.budgetPerCity)} per city (over it: ask)` },
+    { field: "regions", text: `regions: ${pol.regions.join(", ") || "anywhere"}` },
+    { field: "excludeCities", text: `never route: ${pol.excludeCities.join(", ") || "no excluded cities"}` },
+    { field: "venue.minCapacity", text: `venue capacity ${pol.venue.minCapacity.toLocaleString("en-US")}-${pol.venue.maxCapacity.toLocaleString("en-US")} where Qloo knows a capacity` },
+    { field: "minGapDays", text: `at least ${pol.minGapDays} days between shows` },
+  ];
+  if (pol.minKmBetweenStops !== undefined) out.push({ field: "minKmBetweenStops", text: `radius clause: no two stops within ${pol.minKmBetweenStops} km` });
+  if (pol.maxKmPerLeg) out.push({ field: "maxKmPerLeg", text: `no leg over ${pol.maxKmPerLeg.toLocaleString("en-US")} km` });
+  if (pol.blackoutDates?.length) out.push({ field: "blackoutDates", text: `no shows on ${pol.blackoutDates.join(", ")}` });
+  if (pol.heldVenues?.length) out.push({ field: "heldVenues", text: `holds: ${pol.heldVenues.map((h) => `${h.city} - ${h.venue} on ${h.date}`).join("; ")}` });
+  if (pol.approvals) out.push({ field: "approvals.itinerary", text: pol.approvals.itinerary === "ask" ? "every itinerary shown to the promoter first" : "itineraries built without asking when inside every bound" });
+  return out.map((r) => ({ ...r, cited: cited.has(r.field) || (r.field === "venue.minCapacity" && (cited.has("venue.maxCapacity") || cited.has("venue"))) }));
+}
+
 /** Read-only tour page rendered from the URL payload: no agent, no LLM, no server state. Printable (browser print = PDF). */
 export default function SharedTour({ p }: { p: SharePayload }) {
   const top = p.candidates.filter((c) => !c.noSignal).slice(0, 12);
@@ -191,26 +214,46 @@ export default function SharedTour({ p }: { p: SharePayload }) {
         </ol>
       </section>
 
-      <section className="mt-4 grid gap-4 text-xs md:grid-cols-2">
+      <section className="mt-4 grid gap-4 text-xs md:grid-cols-2" data-section="governance">
         <div>
-          <h2 className="text-sm font-semibold">Policy the agent worked inside</h2>
+          <h2 className="text-sm font-semibold">Rules this route obeyed</h2>
+          <p className="mt-0.5 text-[11px] text-muted">The promoter&apos;s policy as the agent saw it. Fields marked &quot;cited&quot; were the stated reason for at least one decision below.</p>
           <ul className="mt-1 text-muted">
-            <li>max cities {p.policy.maxCities}; budget per city {usd(p.policy.budgetPerCity)}; capacity window {p.policy.venue.minCapacity.toLocaleString("en-US")}-{p.policy.venue.maxCapacity.toLocaleString("en-US")}; min gap {p.policy.minGapDays} days</li>
-            {p.policy.minKmBetweenStops !== undefined && <li>radius clause: no two stops within {p.policy.minKmBetweenStops} km{p.policy.maxKmPerLeg ? `; max ${p.policy.maxKmPerLeg.toLocaleString("en-US")} km per leg` : ""}</li>}
-            {p.policy.blackoutDates?.length ? <li>blackout dates: {p.policy.blackoutDates.join(", ")}</li> : null}
-            {p.policy.heldVenues?.length ? <li>held: {p.policy.heldVenues.map((h) => `${h.city} - ${h.venue} (${h.date})`).join("; ")}</li> : null}
-            <li>regions: {p.policy.regions.join(", ") || "anywhere"}</li>
-            <li>excluded: {p.policy.excludeCities.join(", ") || "none"}</li>
-          </ul>
-          <h2 className="mt-3 text-sm font-semibold">Decisions</h2>
-          <div className="mt-1 text-muted">
-            {p.audit.allowed} allowed, {p.audit.approved} approved by the promoter, {p.audit.approvalRequired} asked, {p.audit.denied} denied, {p.audit.errors} errors
-          </div>
-          <ul className="mt-1 text-muted">
-            {p.audit.lines.map((l, i) => (
-              <li key={i}>{l}</li>
+            {rules(p).map((r) => (
+              <li key={r.field} className={r.cited ? "text-foreground" : ""}>
+                {r.text}
+                {r.cited ? <span className="ml-1 rounded bg-background px-1 font-mono text-[10px]">cited: {r.field}</span> : null}
+              </li>
             ))}
           </ul>
+          <h2 className="mt-3 text-sm font-semibold">Where the agent asked, and where it was refused</h2>
+          <div className="mt-1 text-muted">
+            {p.audit.allowed} allowed, {p.audit.approved} approved by the promoter, {p.audit.approvalRequired} asked, {p.audit.denied} denied, {p.audit.errors} errors
+            {p.audit.total ? ` (${p.audit.total} entries in the session log)` : ""}
+          </div>
+          {gated(p).length === 0 && <p className="mt-1 text-muted">Every call stayed inside the policy; nothing needed approval and nothing was refused.</p>}
+          <ul className="mt-1 space-y-0.5">
+            {gated(p).map((a, i) => (
+              <li key={i} className="flex flex-wrap gap-x-1">
+                <span className="font-mono text-[10px] text-muted">{a.t}</span>
+                <span className={a.decision === "denied" || a.decision === "error" ? "font-semibold text-bad" : a.decision === "approval-required" ? "font-semibold text-warn" : "font-semibold text-ok"}>{a.decision === "approval-required" ? "asked" : a.decision}</span>
+                <span>{a.action}</span>
+                {a.rule ? <span className="font-mono text-[10px] text-muted">[{a.rule}]</span> : null}
+                {a.reason ? <span className="text-muted">- {a.reason}</span> : null}
+              </li>
+            ))}
+          </ul>
+          <h2 className="mt-3 text-sm font-semibold">Every decision (newest first)</h2>
+          <ul className="mt-1 text-muted">
+            {(p.audit.entries ?? []).map((a, i) => (
+              <li key={i}>
+                <span className="font-mono text-[10px]">{a.t}</span> {a.decision === "approval-required" ? "asked" : a.decision}: {a.action}
+                {a.rule ? <span className="font-mono text-[10px]"> [{a.rule}]</span> : null}
+              </li>
+            ))}
+            {!p.audit.entries && p.audit.lines.map((l, i) => <li key={`v1-${i}`}>{l}</li>)}
+          </ul>
+          {p.audit.note && <p className="mt-1 text-[11px] text-muted">{p.audit.note}</p>}
         </div>
         <div>
           <h2 className="text-sm font-semibold">Qloo calls behind this plan</h2>
@@ -225,7 +268,7 @@ export default function SharedTour({ p }: { p: SharePayload }) {
             ))}
           </ul>
           <h2 className="mt-3 text-sm font-semibold">What this does not establish</h2>
-          <p className="mt-1 text-muted">Affinity is a taste over-index, not a ticket forecast; listener density is not attendance; venues have no capacity or price in Qloo place data, so the capacity window only applies where a figure exists; nothing here checks venue availability or holds. Generated {p.generatedAt.slice(0, 10)}.</p>
+          <p className="mt-1 text-muted">Affinity is a taste over-index, not a ticket forecast; listener density is not attendance; venues have no capacity or price in Qloo place data, so the capacity window only applies where a figure exists; holds, blackout dates and the radius clause are the promoter&apos;s own inputs, not venue data, and nothing here checks availability beyond them. Generated {p.generatedAt.slice(0, 10)}.</p>
         </div>
       </section>
     </div>

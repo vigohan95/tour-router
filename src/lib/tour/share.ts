@@ -12,7 +12,13 @@ import type { AuditEntry } from "../store";
 import type { Policy } from "../policy/schema";
 import type { CompareResult, DataModeLike, Partner, Plan, QlooCall } from "./types";
 
-export const SHARE_VERSION = 1;
+/** v2 adds the full policy snapshot and structured audit lines; v1 links (names + scores) still open. */
+export const SHARE_VERSION = 2;
+export const SHARE_VERSIONS_ACCEPTED = [1, 2];
+/** Keep the path under this many characters (lz-string, URL-safe); comfortably inside every browser's limit and most chat clients' link handling. */
+export const MAX_SHARE_PATH = 7_500;
+/** Newest audit lines carried on the share page before the budget starts trimming. */
+export const SHARE_AUDIT_LINES = 30;
 
 export interface SharedPartner {
   name: string;
@@ -71,6 +77,16 @@ export interface SharedCompare {
   policy?: { label: string; flips: string[] };
 }
 
+export interface SharedAuditLine {
+  /** HH:MM UTC */
+  t: string;
+  actor: AuditEntry["actor"];
+  decision: AuditEntry["decision"];
+  action: string;
+  rule?: string;
+  reason?: string;
+}
+
 export interface SharePayload {
   v: number;
   act: { name: string; kind?: "artist" | "person"; hint?: string };
@@ -85,8 +101,22 @@ export interface SharePayload {
   candidates: SharedCandidate[];
   compare?: SharedCompare;
   cobill?: { opener: string; detail?: string; stopsAppeared: number; ofStops: number; meanAffinity: number; method: "joint" | "averaged"; note: string; locals: Record<string, string> };
-  policy: { maxCities: number; budgetPerCity: number; regions: string[]; excludeCities: string[]; venue: { minCapacity: number; maxCapacity: number }; minGapDays: number; blackoutDates?: string[]; heldVenues?: Array<{ city: string; venue: string; date: string }>; minKmBetweenStops?: number; maxKmPerLeg?: number };
-  audit: { allowed: number; approved: number; denied: number; approvalRequired: number; errors: number; lines: string[] };
+  policy: { maxCities: number; budgetPerCity: number; regions: string[]; excludeCities: string[]; venue: { minCapacity: number; maxCapacity: number }; minGapDays: number; blackoutDates?: string[]; heldVenues?: Array<{ city: string; venue: string; date: string }>; minKmBetweenStops?: number; maxKmPerLeg?: number; approvals?: { itinerary: "auto" | "ask"; alwaysAsk: string[]; neverAllow: string[] } };
+  audit: {
+    allowed: number;
+    approved: number;
+    denied: number;
+    approvalRequired: number;
+    errors: number;
+    /** v1: formatted strings. */
+    lines: string[];
+    /** v2: the newest entries, structured, newest first. */
+    entries?: SharedAuditLine[];
+    /** Total entries in the session's audit log (so the reader knows how much was left out). */
+    total?: number;
+    /** Set when the URL budget trimmed the log ("showing the last 15 of 212 entries"). */
+    note?: string;
+  };
   qloo: { calls: number; cached: number; endpoints: Array<{ endpoint: string; type: string; n: number }> };
 }
 
@@ -106,8 +136,33 @@ const partner = (p?: Partner): SharedPartner | undefined =>
       }
     : undefined;
 
-/** Build the payload from the studio state. Pure. */
+const auditLine = (a: AuditEntry, withReason: boolean): SharedAuditLine => ({ t: a.ts.slice(11, 16), actor: a.actor, decision: a.decision, action: a.action.slice(0, 90), rule: a.rule, reason: withReason && a.reason ? a.reason.slice(0, 140) : undefined });
+
+/**
+ * Build the payload from the studio state. Pure. The policy snapshot is the whole policy; the audit log is the
+ * newest SHARE_AUDIT_LINES entries, trimmed further (then the candidate table) until the encoded path fits
+ * MAX_SHARE_PATH, with a note saying what was left out.
+ */
 export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[], now = new Date()): SharePayload {
+  const full = buildSharePayloadUnbounded(plan, policy, audit, now);
+  const decisions = audit.filter((a) => a.decision !== "info");
+  const steps: Array<{ lines: number; reasons: boolean; candidates: number }> = [
+    { lines: SHARE_AUDIT_LINES, reasons: true, candidates: 40 },
+    { lines: SHARE_AUDIT_LINES, reasons: false, candidates: 40 },
+    { lines: 15, reasons: false, candidates: 30 },
+    { lines: 8, reasons: false, candidates: 20 },
+    { lines: 4, reasons: false, candidates: 12 },
+  ];
+  for (const step of steps) {
+    const entries = decisions.slice(0, step.lines).map((a) => auditLine(a, step.reasons));
+    const trimmed: SharePayload = { ...full, candidates: full.candidates.slice(0, step.candidates), audit: { ...full.audit, entries, note: entries.length < decisions.length ? `Showing the newest ${entries.length} of ${decisions.length} decisions${step.reasons ? "" : " (reasons left out)"}; the full log is in the studio session.` : undefined } };
+    if (sharePath(trimmed).length <= MAX_SHARE_PATH) return trimmed;
+  }
+  const entries = decisions.slice(0, 4).map((a) => auditLine(a, false));
+  return { ...full, candidates: full.candidates.slice(0, 12), audit: { ...full.audit, entries, note: `Showing the newest ${entries.length} of ${decisions.length} decisions; the link would otherwise be too long.` } };
+}
+
+function buildSharePayloadUnbounded(plan: Plan, policy: Policy, audit: AuditEntry[], now = new Date()): SharePayload {
   const it = plan.itinerary;
   if (!it) throw new Error("Build an itinerary before sharing.");
   const ranked = new Map(plan.candidates.map((c) => [c.city, c]));
@@ -143,7 +198,7 @@ export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[
     candidates,
     compare,
     cobill: plan.coBill ? { opener: plan.coBill.opener.name, detail: plan.coBill.opener.detail, stopsAppeared: plan.coBill.stopsAppeared, ofStops: plan.coBill.ofStops, meanAffinity: plan.coBill.meanAffinity, method: plan.coBill.method, note: plan.coBill.methodNote, locals: plan.coBill.locals } : undefined,
-    policy: { maxCities: policy.maxCities, budgetPerCity: policy.budgetPerCity, regions: policy.regions, excludeCities: policy.excludeCities, venue: policy.venue, minGapDays: policy.minGapDays, blackoutDates: policy.blackoutDates, heldVenues: policy.heldVenues, minKmBetweenStops: policy.minKmBetweenStops, maxKmPerLeg: policy.maxKmPerLeg },
+    policy: { maxCities: policy.maxCities, budgetPerCity: policy.budgetPerCity, regions: policy.regions, excludeCities: policy.excludeCities, venue: policy.venue, minGapDays: policy.minGapDays, blackoutDates: policy.blackoutDates, heldVenues: policy.heldVenues, minKmBetweenStops: policy.minKmBetweenStops, maxKmPerLeg: policy.maxKmPerLeg, approvals: { itinerary: policy.approvals.itinerary, alwaysAsk: policy.approvals.alwaysAsk, neverAllow: policy.approvals.neverAllow } },
     audit: {
       allowed: count("allowed"),
       approved: count("approved"),
@@ -154,6 +209,7 @@ export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[
         .filter((a) => a.decision !== "info")
         .slice(0, 12)
         .map((a) => `${a.decision}: ${a.action}${a.rule ? ` [${a.rule}]` : ""}`),
+      total: audit.length,
     },
     qloo: { calls: plan.calls.length, cached: plan.calls.filter((c) => c.cached).length, endpoints: [...endpoints.values()] },
   };
@@ -177,7 +233,7 @@ export function decodeShare(encoded: string): SharePayload | undefined {
     const json = decompressFromEncodedURIComponent(safeDecode(encoded));
     if (!json) return undefined;
     const p = JSON.parse(json) as SharePayload;
-    if (!p || typeof p !== "object" || p.v !== SHARE_VERSION || !Array.isArray(p.stops) || !p.act?.name) return undefined;
+    if (!p || typeof p !== "object" || !SHARE_VERSIONS_ACCEPTED.includes(p.v) || !Array.isArray(p.stops) || !p.act?.name) return undefined;
     return p;
   } catch {
     return undefined;
