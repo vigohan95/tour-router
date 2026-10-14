@@ -12,6 +12,7 @@ function Partner({ p, tag }: { p?: SharedPartner; tag: string }) {
   return (
     <div className="text-sm">
       <span className="mr-1 rounded bg-background px-1 text-[10px] uppercase tracking-wide text-muted">{tag}</span>
+      {p.held && <span className="mr-1 rounded bg-amber-500 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">HELD</span>}
       <span className="font-medium">{p.name}</span>
       {p.detail && <span className="ml-1 text-xs text-muted">({p.detail}{p.capacity ? `, ${p.capacity.toLocaleString("en-US")} cap` : ""})</span>}
       <span className="ml-2 text-xs tabular-nums text-muted">{pct(p.affinity)}</span>
@@ -153,6 +154,9 @@ export default function SharedTour({ p }: { p: SharePayload }) {
           <h2 className="text-sm font-semibold">Policy the agent worked inside</h2>
           <ul className="mt-1 text-muted">
             <li>max cities {p.policy.maxCities}; budget per city {usd(p.policy.budgetPerCity)}; capacity window {p.policy.venue.minCapacity.toLocaleString("en-US")}-{p.policy.venue.maxCapacity.toLocaleString("en-US")}; min gap {p.policy.minGapDays} days</li>
+            {p.policy.minKmBetweenStops !== undefined && <li>radius clause: no two stops within {p.policy.minKmBetweenStops} km{p.policy.maxKmPerLeg ? `; max ${p.policy.maxKmPerLeg.toLocaleString("en-US")} km per leg` : ""}</li>}
+            {p.policy.blackoutDates?.length ? <li>blackout dates: {p.policy.blackoutDates.join(", ")}</li> : null}
+            {p.policy.heldVenues?.length ? <li>held: {p.policy.heldVenues.map((h) => `${h.city} - ${h.venue} (${h.date})`).join("; ")}</li> : null}
             <li>regions: {p.policy.regions.join(", ") || "anywhere"}</li>
             <li>excluded: {p.policy.excludeCities.join(", ") || "none"}</li>
           </ul>

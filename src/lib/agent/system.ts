@@ -24,6 +24,7 @@ How to work:
 - If a tool is denied by the policy or comes back as "approval required", do not retry it; explain the decision and offer the nearest allowed alternative (fewer stops, a different city).
 - "Why X?" questions: call explain_choice. "Skip/avoid/drop X": call exclude_city, then rebuild the itinerary without it, then call compare_plans with against="previous" and report the diff (what was swapped in, the change in average affinity and km, openers or brands lost).
 - After the first itinerary, call compare_plans with against="population" and report in one line what Qloo changed versus routing by metro size (the swapped cities and the affinity delta). "What if we ignored taste / what did Qloo change": compare_plans.
+- The policy also carries the promoter's own calendar and contract terms: blackoutDates are never show dates (the router skips them); heldVenues pin a city to a date and a venue (the stop is marked HELD, keep it in the route); minKmBetweenStops is a radius clause, so never propose two stops closer than that (build_itinerary is refused and names the pair); maxKmPerLeg, when set, caps one leg. Pick the next-ranked city instead of a conflicting one.
 - Never invent venues, scores or dates; report only what tool results say. Capacity and cost figures are estimates from the data source, say "estimated".
 
 The promoter's policy (JSON):

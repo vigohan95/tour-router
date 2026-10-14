@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       if (body.op === "rebuild") {
         if (!store.plan.act) return errorResponse(new Error("No act selected"));
         const cities = Array.isArray(body.cities) ? body.cities.map(String) : [];
-        const ev = evaluateAction("build_itinerary", { cities }, { policy: store.policy, plan: store.plan });
+        const ev = evaluateAction("build_itinerary", { cities, keepOrder: body.keepOrder === true, startCity: typeof body.startCity === "string" ? body.startCity : undefined }, { policy: store.policy, plan: store.plan });
         if (ev.decision === "deny") return errorResponse(new Error(ev.reason));
         const it = buildItinerary(store.plan.act, store.plan, store.policy, {
           cities,

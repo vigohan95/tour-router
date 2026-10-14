@@ -204,7 +204,7 @@ export default function TourStudio() {
               <TourMap candidates={plan.candidates} itinerary={plan.itinerary} />
             </div>
           </div>
-          <PartnerCards partners={plan.partners} itinerary={plan.itinerary} />
+          <PartnerCards partners={plan.partners} itinerary={plan.itinerary} holds={policy.heldVenues} />
           <ItineraryPanel itinerary={plan.itinerary} onReroute={onReroute} onShare={share} shared={shared} />
           <ComparePanel itinerary={plan.itinerary} compare={plan.compare} busy={busy} onCompare={onCompare} />
           <QlooCallsPanel calls={plan.calls ?? []} mode={view.mode} />

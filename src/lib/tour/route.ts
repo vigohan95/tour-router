@@ -88,12 +88,39 @@ export function routeOrder(points: Point[], start?: number): number[] {
   return best;
 }
 
-/** Spread `n` show dates from `start`, `gapDays` apart, skipping nothing (promoters tune by hand). */
-export function showDates(start: Date, n: number, gapDays = 2): string[] {
+export interface DateOptions {
+  /** yyyy-mm-dd dates that are never show dates (policy.blackoutDates). */
+  blackout?: string[];
+  /** Dates already taken by held stops: free dates keep at least `gapDays` away from them. */
+  avoid?: string[];
+}
+
+export const DAY_MS = 86_400_000;
+
+export function addDays(iso: string, n: number): string {
+  return new Date(new Date(iso + "T00:00:00Z").getTime() + n * DAY_MS).toISOString().slice(0, 10);
+}
+
+export function daysBetween(a: string, b: string): number {
+  return Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / DAY_MS);
+}
+
+/**
+ * Spread `n` show dates from `start`, at least `gapDays` apart, never on a blackout date and never within `gapDays`
+ * of a held date. A date that collides moves forward one day at a time (bounded, so a policy full of blackouts
+ * cannot loop forever).
+ */
+export function showDates(start: Date, n: number, gapDays = 2, opts: DateOptions = {}): string[] {
+  const blackout = new Set(opts.blackout ?? []);
+  const avoid = opts.avoid ?? [];
+  const clashes = (d: string) => blackout.has(d) || avoid.some((a) => Math.abs(daysBetween(a, d)) < gapDays);
   const out: string[] = [];
+  let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())).toISOString().slice(0, 10);
   for (let i = 0; i < n; i++) {
-    const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + i * gapDays));
-    out.push(d.toISOString().slice(0, 10));
+    let d = i === 0 ? cursor : addDays(cursor, gapDays);
+    for (let guard = 0; guard < 400 && clashes(d); guard++) d = addDays(d, 1);
+    out.push(d);
+    cursor = d;
   }
   return out;
 }

@@ -66,6 +66,8 @@ export interface Partner {
   capacity?: number;
   estimatedCostUsd?: number;
   explainability?: Contribution[];
+  /** The promoter holds this venue (policy.heldVenues); when no Qloo venue matched the name, affinity is 0 and detail says so. */
+  held?: boolean;
 }
 
 export interface CityPartners {
@@ -95,6 +97,8 @@ export interface Stop {
   brand?: Partner;
   /** Distance from the previous stop in km (0 for the first). */
   legKm: number;
+  /** Pinned to this date by a promoter hold (policy.heldVenues). */
+  held?: boolean;
 }
 
 export interface Itinerary {

@@ -8,6 +8,7 @@
 import type { Policy } from "../policy/schema";
 import { CITIES } from "./cities";
 import { makeItinerary, type BuildOptions } from "./actions";
+import { respectRadius } from "./legs";
 import type { Act, CompareResult, Itinerary, Plan, RankedCity, Stop } from "./types";
 import { BASELINE_LABEL } from "./compare-text";
 
@@ -17,12 +18,14 @@ export type BaselineMode = "population" | "popularity";
  * The `n` non-excluded candidates a promoter would pick with no taste data: by metro size, or by raw listener
  * density. A start city the promoter named is kept in both routes, so the diff only shows what taste changed.
  */
-export function baselineCities(candidates: RankedCity[], n: number, mode: BaselineMode, keep?: string): string[] {
+export function baselineCities(candidates: RankedCity[], n: number, mode: BaselineMode, keep?: string, minKm = 0): string[] {
   const pool = candidates.filter((c) => !c.excluded);
   const metro = new Map(CITIES.map((c) => [c.name, c.metroM]));
   const sorted = [...pool].sort((a, b) => (mode === "population" ? (metro.get(b.city) ?? 0) - (metro.get(a.city) ?? 0) : b.popularity - a.popularity) || a.city.localeCompare(b.city));
   const kept = keep && pool.some((c) => c.city === keep) ? [keep] : [];
-  return [...kept, ...sorted.map((c) => c.city).filter((c) => !kept.includes(c))].slice(0, n);
+  const ordered = [...kept, ...sorted.map((c) => c.city).filter((c) => !kept.includes(c))];
+  // The baseline obeys the same radius clause as the taste route: same rules, different data.
+  return (minKm > 0 ? respectRadius(ordered, minKm) : ordered).slice(0, n);
 }
 
 const round = (n: number, d = 3) => Number(n.toFixed(d));
@@ -69,7 +72,7 @@ export function compareWith(act: Act, plan: Plan, policy: Policy, against: Compa
     baseline = plan.previousItinerary;
   } else {
     const startCity = opts.startCity ?? current.startCity;
-    const cities = baselineCities(plan.candidates, current.stops.length, against, startCity);
+    const cities = baselineCities(plan.candidates, current.stops.length, against, startCity, policy.minKmBetweenStops);
     if (cities.length === 0) throw new Error("No candidates to build a baseline from; rank cities first.");
     // Same start city, same dates, same gap, same routing (nearest neighbour + 2-opt from that start).
     baseline = makeItinerary(act, plan, policy, { cities, startCity, startDate: opts.startDate ?? current.startDate, gapDays: opts.gapDays ?? current.gapDays }, plan.mode, now);

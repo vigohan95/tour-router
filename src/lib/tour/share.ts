@@ -20,6 +20,7 @@ export interface SharedPartner {
   affinity: number;
   capacity?: number;
   explain?: Array<{ label: string; score: number }>;
+  held?: boolean;
 }
 
 export interface SharedStop {
@@ -34,6 +35,7 @@ export interface SharedStop {
   rank?: number;
   populationRank?: number;
   legKm: number;
+  held?: boolean;
   venue?: SharedPartner;
   opener?: SharedPartner;
   brand?: SharedPartner;
@@ -78,7 +80,7 @@ export interface SharePayload {
   stops: SharedStop[];
   candidates: SharedCandidate[];
   compare?: SharedCompare;
-  policy: { maxCities: number; budgetPerCity: number; regions: string[]; excludeCities: string[]; venue: { minCapacity: number; maxCapacity: number }; minGapDays: number };
+  policy: { maxCities: number; budgetPerCity: number; regions: string[]; excludeCities: string[]; venue: { minCapacity: number; maxCapacity: number }; minGapDays: number; blackoutDates?: string[]; heldVenues?: Array<{ city: string; venue: string; date: string }>; minKmBetweenStops?: number; maxKmPerLeg?: number };
   audit: { allowed: number; approved: number; denied: number; approvalRequired: number; errors: number; lines: string[] };
   qloo: { calls: number; cached: number; endpoints: Array<{ endpoint: string; type: string; n: number }> };
 }
@@ -90,6 +92,7 @@ const partner = (p?: Partner): SharedPartner | undefined =>
         detail: p.detail,
         affinity: p.affinity,
         capacity: p.capacity,
+        held: p.held || undefined,
         explain: p.explainability
           ?.slice()
           .sort((a, b) => b.score - a.score)
@@ -105,7 +108,7 @@ export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[
   const ranked = new Map(plan.candidates.map((c) => [c.city, c]));
   const stops: SharedStop[] = it.stops.map((s) => {
     const r = ranked.get(s.city);
-    return { order: s.order, city: s.city, country: s.country, lat: s.lat, lon: s.lon, date: s.date, score: s.score, lift: r?.lift, rank: r?.rank, populationRank: r?.populationRank, legKm: s.legKm, venue: partner(s.venue), opener: partner(s.opener), brand: partner(s.brand), why: plan.partners[s.city]?.why };
+    return { order: s.order, city: s.city, country: s.country, lat: s.lat, lon: s.lon, date: s.date, score: s.score, lift: r?.lift, rank: r?.rank, populationRank: r?.populationRank, legKm: s.legKm, held: s.held || undefined, venue: partner(s.venue), opener: partner(s.opener), brand: partner(s.brand), why: plan.partners[s.city]?.why };
   });
   const candidates: SharedCandidate[] = plan.candidates.slice(0, 40).map((c) => ({ city: c.city, country: c.country, score: c.score, popularity: c.popularity, rank: c.rank, popularityRank: c.popularityRank, populationRank: c.populationRank, lift: c.lift, excluded: c.excluded, noSignal: c.noSignal }));
   const cmp = plan.compare;
@@ -134,7 +137,7 @@ export function buildSharePayload(plan: Plan, policy: Policy, audit: AuditEntry[
     stops,
     candidates,
     compare,
-    policy: { maxCities: policy.maxCities, budgetPerCity: policy.budgetPerCity, regions: policy.regions, excludeCities: policy.excludeCities, venue: policy.venue, minGapDays: policy.minGapDays },
+    policy: { maxCities: policy.maxCities, budgetPerCity: policy.budgetPerCity, regions: policy.regions, excludeCities: policy.excludeCities, venue: policy.venue, minGapDays: policy.minGapDays, blackoutDates: policy.blackoutDates, heldVenues: policy.heldVenues, minKmBetweenStops: policy.minKmBetweenStops, maxKmPerLeg: policy.maxKmPerLeg },
     audit: {
       allowed: count("allowed"),
       approved: count("approved"),

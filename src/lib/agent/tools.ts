@@ -111,7 +111,7 @@ export function buildTools(): ToolSet {
     }),
 
     build_itinerary: tool({
-      description: "Order the chosen cities into a route (nearest-neighbour + 2-opt), assign show dates and attach each city's recommended venue, opener and brand. Over the city cap or the per-city budget this asks the user first.",
+      description: "Order the chosen cities into a route (nearest-neighbour + 2-opt), assign show dates (skipping the policy's blackout dates; held venues pin their city to their date and show HELD) and attach each city's recommended venue, opener and brand. Over the city cap or the per-city budget this asks the user first; two stops inside the radius clause (minKmBetweenStops) or a leg over maxKmPerLeg are refused.",
       inputSchema: z.object({
         cities: z.array(z.string()).min(1).describe("City names to route, from the ranked candidates"),
         startCity: z.string().optional(),

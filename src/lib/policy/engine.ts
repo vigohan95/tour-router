@@ -1,3 +1,4 @@
+import { legChecks } from "../tour/legs";
 import type { Plan } from "../tour/types";
 import { isExcluded, type Policy } from "./schema";
 
@@ -66,6 +67,16 @@ export function evaluateAction(tool: string, rawInput: unknown, ctx: EvaluationC
       const summary = `Build a ${cities.length}-stop itinerary`;
       const excluded = cities.filter((c) => isExcluded(policy, c) || plan.candidates.find((x) => x.city.toLowerCase() === c.toLowerCase())?.excluded);
       if (excluded.length) return { decision: "deny", reason: `${excluded.join(", ")} ${excluded.length === 1 ? "is" : "are"} excluded; drop ${excluded.length === 1 ? "it" : "them"} and try again.`, summary, rule: "excludeCities" };
+      // Radius clause and per-leg cap: the promoter's own numbers, checked on the order the router would produce.
+      const legs = legChecks(cities, policy, { startCity: typeof input.startCity === "string" ? input.startCity : undefined, keepOrder: input.keepOrder === true });
+      if (legs.tooClose.length) {
+        const v = legs.tooClose[0];
+        return { decision: "deny", reason: `${v.a} and ${v.b} are ${v.km} km apart, inside your ${policy.minKmBetweenStops} km radius clause${legs.tooClose.length > 1 ? ` (${legs.tooClose.length} such pairs)` : ""}; drop one of them.`, summary, rule: "minKmBetweenStops" };
+      }
+      if (legs.tooFar.length) {
+        const v = legs.tooFar[0];
+        return { decision: "deny", reason: `The leg ${v.a} -> ${v.b} is ${v.km.toLocaleString("en-US")} km, over your ${policy.maxKmPerLeg!.toLocaleString("en-US")} km per-leg limit${legs.tooFar.length > 1 ? ` (${legs.tooFar.length} such legs)` : ""}.`, summary, rule: "maxKmPerLeg" };
+      }
       if (cities.length > policy.maxCities) return { decision: "approve", reason: `${cities.length} stops is over your ${policy.maxCities}-city cap.`, summary, rule: "maxCities" };
       const over = cities.filter((c) => {
         const v = plan.partners[c]?.recommendedVenue;
@@ -75,7 +86,7 @@ export function evaluateAction(tool: string, rawInput: unknown, ctx: EvaluationC
         return { decision: "approve", reason: `Estimated venue cost in ${over.join(", ")} is above your ${usd(policy.budgetPerCity)} per-city budget.`, summary, rule: "budgetPerCity" };
       }
       if (policy.approvals.itinerary === "ask") return { decision: "approve", reason: "Policy: itineraries always ask (approvals.itinerary = ask).", summary, rule: "approvals.itinerary" };
-      return { decision: "allow", reason: `${cities.length} stops, inside the ${policy.maxCities}-city cap and the ${usd(policy.budgetPerCity)} per-city budget.`, summary, rule: "maxCities" };
+      return { decision: "allow", reason: `${cities.length} stops, inside the ${policy.maxCities}-city cap, the ${usd(policy.budgetPerCity)} per-city budget and the ${policy.minKmBetweenStops} km radius clause.`, summary, rule: "maxCities" };
     }
 
     case "exclude_city": {

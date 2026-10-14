@@ -13,7 +13,7 @@
 import { getQloo } from "../qloo";
 import type { Contribution, HeatmapCell, QlooAdapter, SearchHit } from "../qloo/types";
 import type { Policy } from "../policy/schema";
-import { isExcluded } from "../policy/schema";
+import { heldFor, isExcluded } from "../policy/schema";
 import { getStore, touch } from "../store";
 import { COUNTRY_QUERY, citiesIn, findCity, qlooLocality, type City, type Region } from "./cities";
 import { haversineKm, pathKm, routeOrder, showDates } from "./route";
@@ -227,33 +227,64 @@ export interface BuildOptions {
   keepOrder?: boolean;
 }
 
-/** Pure: route + date the cities with the plan's partners, without storing anything. */
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * The venue a held stop carries: the Qloo venue card whose name overlaps the promoter's text when there is one
+ * (so affinity and explainability stay visible), otherwise a plain promoter hold with no Qloo score.
+ */
+export function heldVenue(venueName: string, venues: Partner[] = []): Partner {
+  const want = normName(venueName);
+  const match = venues.find((v) => {
+    const have = normName(v.name);
+    return have === want || have.includes(want) || want.includes(have);
+  });
+  if (match) return { ...match, held: true };
+  return { entity_id: `held:${want}`, name: venueName, affinity: 0, detail: "promoter hold, not a Qloo result", held: true };
+}
+
+/**
+ * Pure: route + date the cities with the plan's partners, without storing anything.
+ *
+ * Scheduling rules (all from the policy, i.e. the promoter's own inputs):
+ *  - held stops (policy.heldVenues) are anchored on their date and carry the held venue, flagged HELD;
+ *  - free stops take the next dates in route order, at least minGapDays apart, never on a blackout date and never
+ *    within the gap of a held date;
+ *  - the itinerary is then ordered by date, so a hold can pull a city earlier or later than geography alone would.
+ */
 export function makeItinerary(act: Act, plan: Plan, policy: Policy, opts: BuildOptions, mode = plan.mode, now = new Date()): Itinerary {
   const stopsIn = opts.cities.map((name) => {
     const ranked = plan.candidates.find((x) => x.city.toLowerCase() === name.toLowerCase());
     const c = findCity(name);
     if (!c) throw new Error(`Unknown city "${name}".`);
-    return { c, ranked };
+    return { c, ranked, hold: heldFor(policy, c.name) };
   });
   if (stopsIn.length === 0) throw new Error("No cities to route.");
   const points = stopsIn.map(({ c }) => ({ lat: c.lat, lon: c.lon }));
   const startIdx = opts.startCity ? stopsIn.findIndex(({ c }) => c.name.toLowerCase() === opts.startCity!.toLowerCase()) : -1;
   const order = opts.keepOrder ? points.map((_, i) => i) : routeOrder(points, startIdx >= 0 ? startIdx : undefined);
   const start = opts.startDate ? new Date(opts.startDate + "T00:00:00Z") : nextMonthStart(now);
-  const dates = showDates(start, order.length, opts.gapDays ?? policy.minGapDays);
-  const stops: Stop[] = order.map((idx, i) => {
-    const { c, ranked } = stopsIn[idx];
+  const gap = opts.gapDays ?? policy.minGapDays;
+  const freeOrder = order.filter((idx) => !stopsIn[idx].hold);
+  const heldDates = stopsIn.filter((s) => s.hold).map((s) => s.hold!.date);
+  const freeDates = showDates(start, freeOrder.length, gap, { blackout: policy.blackoutDates, avoid: heldDates });
+  const dated = [...freeOrder.map((idx, i) => ({ idx, date: freeDates[i] })), ...order.filter((idx) => stopsIn[idx].hold).map((idx) => ({ idx, date: stopsIn[idx].hold!.date }))];
+  // Chronological order; among equal dates (only possible between two holds) keep route order.
+  const seq = dated.map((d, pos) => ({ ...d, pos })).sort((a, b) => a.date.localeCompare(b.date) || a.pos - b.pos);
+  const stops: Stop[] = seq.map(({ idx, date }, i) => {
+    const { c, ranked, hold } = stopsIn[idx];
     const p = plan.partners[c.name];
-    const prev = i > 0 ? stopsIn[order[i - 1]].c : undefined;
-    return { order: i + 1, city: c.name, country: c.country, lat: c.lat, lon: c.lon, date: dates[i], score: ranked?.score ?? 0, venue: p?.recommendedVenue, opener: p?.openers[0], brand: p?.brands[0], legKm: prev ? Math.round(pathKm([{ lat: prev.lat, lon: prev.lon }, { lat: c.lat, lon: c.lon }])) : 0 };
+    const prev = i > 0 ? stopsIn[seq[i - 1].idx].c : undefined;
+    const venue = hold ? heldVenue(hold.venue, p?.venues) : p?.recommendedVenue;
+    return { order: i + 1, city: c.name, country: c.country, lat: c.lat, lon: c.lon, date, score: ranked?.score ?? 0, venue, opener: p?.openers[0], brand: p?.brands[0], legKm: prev ? Math.round(pathKm([{ lat: prev.lat, lon: prev.lon }, { lat: c.lat, lon: c.lon }])) : 0, held: hold ? true : undefined };
   });
   return {
     id: `tour_${now.getTime().toString(36)}`,
     act,
     stops,
     totalKm: Math.round(stops.reduce((a, s) => a + s.legKm, 0)),
-    startDate: dates[0],
-    endDate: dates[dates.length - 1],
+    startDate: stops[0].date,
+    endDate: stops[stops.length - 1].date,
     estimatedCostUsd: stops.reduce((a, s) => a + (s.venue?.estimatedCostUsd ?? 0), 0),
     startCity: startIdx >= 0 ? stopsIn[startIdx].c.name : undefined,
     gapDays: opts.gapDays,

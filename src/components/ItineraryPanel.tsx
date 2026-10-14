@@ -88,6 +88,7 @@ export default function ItineraryPanel({ itinerary, onReroute, onShare, shared }
                 </td>
                 <td className="py-1 pr-2 tabular-nums">{pct(s.score)}</td>
                 <td className="py-1 pr-2">
+                  {s.held && <span className="mr-1 rounded bg-amber-500 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white" title="Promoter hold (policy.heldVenues): pinned to this date and venue">HELD</span>}
                   {s.venue?.name ?? "-"}
                   {s.venue?.capacity ? <span className="text-xs text-muted"> ({s.venue.capacity.toLocaleString("en-US")})</span> : s.venue?.detail ? <span className="text-xs text-muted"> ({s.venue.detail})</span> : null}
                 </td>

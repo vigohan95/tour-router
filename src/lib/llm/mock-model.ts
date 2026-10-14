@@ -7,6 +7,7 @@
  */
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3GenerateResult, LanguageModelV3Prompt, LanguageModelV3StreamPart, LanguageModelV3StreamResult, LanguageModelV3Usage } from "@ai-sdk/provider";
 import { CITIES, parseRegion, type Region } from "../tour/cities";
+import { respectRadius } from "../tour/legs";
 
 type J = Record<string, unknown>;
 const j = (v: unknown): J => (v && typeof v === "object" && !Array.isArray(v) ? (v as J) : {});
@@ -223,8 +224,11 @@ function planPlaybook(turn: Turn): Action {
   const avoid = /\b(skip|avoid|without|except|not)\b/i.test(text) ? mentioned : [];
   const startCity = parseStartCity(text);
   // A named start city is part of the tour whatever its rank, as long as it is a ranked, non-excluded candidate.
+  // The policy's radius clause (minKmBetweenStops) is applied greedily in rank order, so build_itinerary is not refused for it.
   const pool = cities.filter((c) => !avoid.includes(c));
-  const chosen = startCity && pool.includes(startCity) ? [startCity, ...pool.filter((c) => c !== startCity)].slice(0, wanted) : pool.slice(0, wanted);
+  const ordered = startCity && pool.includes(startCity) ? [startCity, ...pool.filter((c) => c !== startCity)] : pool;
+  const heldCities = arr(turn.policy.heldVenues).map((h) => s(h.city));
+  const chosen = respectRadius(ordered, n(turn.policy.minKmBetweenStops, 0), heldCities.filter((h) => !ordered.includes(h))).slice(0, wanted);
   if (chosen.length === 0) return { type: "text", text: arr(ranked.output.cities).some((c) => c.unscored) ? `Qloo has no heatmap signal for ${s(j(turn.state.act).name) || "this act"} in these regions (every candidate came back unscored), so I will not route on a guess. Try another region, or the act's other entity (musician vs comedian).` : "Every candidate city is excluded by your policy; relax the exclude list or regions and ask again." };
   // 3. partners for each chosen city, in parallel
   const partners = has(turn, "pick_city_partners");
